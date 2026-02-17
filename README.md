@@ -8,3 +8,7 @@ This is just one big blob of vibe code that still needs to be cleaned up and sep
 
 ## Unit Coverage
 Unit tests need to be implemented once the code is refactored
+
+## Convert to full async
+
+## Implement scheduled cleanup task
