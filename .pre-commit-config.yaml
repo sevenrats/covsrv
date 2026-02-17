@@ -1,0 +1,26 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.3
+    hooks:
+      - id: ruff-check
+        name: ruff – apply all fixable diagnostics
+        args: [--fix]
+        stages: [pre-commit, pre-push]
+
+      - id: ruff-check
+        name: ruff – apply import-only fixes
+        args: [--select, I, --fix]
+        stages: [pre-commit, pre-push]
+
+      - id: ruff-format
+        name: ruff – format code
+        stages: [pre-commit, pre-push]
+
+#  - repo: local
+#    hooks:
+#      - id: run-test-py
+#        name: Run tests
+#        entry: pytest -Werror --cov=. --cov-report=xml tests
+#        language: system
+#        pass_filenames: false
+#        stages: [pre-push]

@@ -1,0 +1,15 @@
+services:
+  covsrv:
+    image: ghcr.io/sevenrats/covsrv:latest
+    ports:
+      - "8000:8000"
+    environment:
+      COVSRV_DIR: /data
+      # optional but common:
+      # TZ: America/Toronto
+    volumes:
+      - covsrv_data:/data
+    restart: unless-stopped
+
+volumes:
+  covsrv_data:
