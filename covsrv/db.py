@@ -125,6 +125,7 @@ async def latest_report_for_repo_hash(
             "received_ts": row.received_ts,
             "overall_percent": row.overall_percent,
             "report_dir": row.report_dir,
+            "provider_url": row.provider_url,
         }
 
 

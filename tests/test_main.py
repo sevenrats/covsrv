@@ -126,6 +126,37 @@ class TestReportIngestDTO:
         assert dto.repo_full == "alice/proj"
         assert dto.branch == "main"
         assert dto.sha == "abc1234567"
+        assert dto.provider_url == "https://github.com"
+
+    def test_from_form_with_provider_url(self):
+        dto = app_module.ReportIngestDTO.from_form(
+            owner="alice",
+            repo="proj",
+            branch="main",
+            sha="abc1234567",
+            provider_url="https://gitlab.com",
+        )
+        assert dto.provider_url == "https://gitlab.com"
+
+    def test_from_form_provider_url_strips_trailing_slash(self):
+        dto = app_module.ReportIngestDTO.from_form(
+            owner="alice",
+            repo="proj",
+            branch="main",
+            sha="abc1234567",
+            provider_url="https://gitlab.com/",
+        )
+        assert dto.provider_url == "https://gitlab.com"
+
+    def test_from_form_empty_provider_url_defaults(self):
+        dto = app_module.ReportIngestDTO.from_form(
+            owner="alice",
+            repo="proj",
+            branch="main",
+            sha="abc1234567",
+            provider_url="",
+        )
+        assert dto.provider_url == "https://github.com"
 
     def test_to_dict(self):
         dto = app_module.ReportIngestDTO.from_form(
@@ -138,6 +169,7 @@ class TestReportIngestDTO:
             "repo_full": "alice/proj",
             "branch": "main",
             "sha": "abc1234567",
+            "provider_url": "https://github.com",
         }
 
     def test_empty_branch_raises(self):
@@ -363,6 +395,44 @@ class TestDashboardHtmlFor:
         html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
         assert str(app_module.TREND_LIMIT) in html
 
+    def test_hash_contains_nav_urls(self):
+        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
+        assert "github.com/alice/proj" in html
+        assert "/alice/proj/h/abc123" in html  # raw_framed_url
+
+    def test_branch_hides_spreadsheet(self):
+        html = app_module.dashboard_html_for("b", "alice/proj", "main")
+        assert 'style="display:none"' in html  # spreadsheet btn hidden
+
+    def test_custom_provider_url(self):
+        html = app_module.dashboard_html_for(
+            "h", "alice/proj", "abc123", provider_url="https://gitlab.com"
+        )
+        assert "gitlab.com/alice/proj" in html
+        assert "github.com" not in html
+
+    def test_default_provider_url(self):
+        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
+        assert "github.com/alice/proj" in html
+
+
+class TestFramedHtmlFor:
+    def test_renders_with_iframe(self):
+        html = app_module.framed_html_for("alice/proj", "abc123")
+        assert "iframe" in html
+        assert "/raw/alice/proj/h/abc123/" in html
+        assert "github.com/alice/proj" in html
+        assert "/alice/proj/h/abc123/chart" in html
+        assert "{{" not in html
+        assert "}}" not in html
+
+    def test_custom_provider_url(self):
+        html = app_module.framed_html_for(
+            "alice/proj", "abc123", provider_url="https://gitlab.com"
+        )
+        assert "gitlab.com/alice/proj" in html
+        assert "github.com" not in html
+
 
 # =====================================================================
 # Integration tests — HTTP endpoints (need DB + client)
@@ -382,6 +452,7 @@ async def seed_report(
     overall_percent: float = 85.0,
     received_ts: int = 1700000000,
     coverage_xml: str = SAMPLE_COVERAGE_XML,
+    provider_url: str = "https://github.com",
 ):
     """Seed a report record + write the HTML directory with coverage.xml."""
     repo_fs = app_module.repo_to_fs(repo_full)
@@ -406,6 +477,7 @@ async def seed_report(
                 received_ts=received_ts,
                 overall_percent=overall_percent,
                 report_dir=str(report_dir),
+                provider_url=provider_url,
             )
         )
         stmt = sqlite_insert(BranchHead).values(
@@ -471,6 +543,14 @@ class TestBranchDashboard:
         assert "text/html" in resp.headers["content-type"]
         assert "Coverage" in resp.text
 
+    async def test_uses_provider_url_from_report(
+        self, client: AsyncClient, tmp_data_dir
+    ):
+        await seed_report(tmp_data_dir, provider_url="https://gitlab.com")
+        resp = await client.get("/alice/proj/b/main")
+        assert resp.status_code == 200
+        assert "gitlab.com/alice/proj" in resp.text
+
 
 # -----------------------------------------------------------------------
 # Hash raw views
@@ -480,34 +560,71 @@ class TestBranchDashboard:
 SHA = "abc1234567890abcdef1234567890abcdef123456"
 
 
-class TestHashRawRedirect:
+class TestHashFramedView:
+    async def test_returns_framed_html(self, client: AsyncClient, tmp_data_dir):
+        resp = await client.get(f"/alice/proj/h/{SHA}")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "iframe" in resp.text
+        assert f"/raw/alice/proj/h/{SHA}/" in resp.text
+
+    async def test_contains_nav_buttons(self, client: AsyncClient, tmp_data_dir):
+        resp = await client.get(f"/alice/proj/h/{SHA}")
+        assert "github.com/alice/proj" in resp.text
+        assert f"/alice/proj/h/{SHA}/chart" in resp.text
+
+    async def test_uses_provider_url_from_report(
+        self, client: AsyncClient, tmp_data_dir
+    ):
+        await seed_report(tmp_data_dir, provider_url="https://gitlab.com")
+        resp = await client.get(f"/alice/proj/h/{SHA}")
+        assert "gitlab.com/alice/proj" in resp.text
+
+
+class TestHashChart:
+    async def test_returns_chart_html(self, client: AsyncClient, tmp_data_dir):
+        resp = await client.get(f"/alice/proj/h/{SHA}/chart")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Coverage" in resp.text
+        assert f"/api/alice/proj/h/{SHA}/trend" in resp.text
+
+    async def test_uses_provider_url_from_report(
+        self, client: AsyncClient, tmp_data_dir
+    ):
+        await seed_report(tmp_data_dir, provider_url="https://gitlab.com")
+        resp = await client.get(f"/alice/proj/h/{SHA}/chart")
+        assert "gitlab.com/alice/proj" in resp.text
+
+
+class TestRawHashRedirect:
     async def test_redirect_appends_slash(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/alice/proj/h/{SHA}", follow_redirects=False)
+        resp = await client.get(f"/raw/alice/proj/h/{SHA}", follow_redirects=False)
         assert resp.status_code == 307
         assert resp.headers["location"].endswith("/")
 
 
-class TestHashRawIndex:
+class TestRawHashIndex:
     async def test_serves_index(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/alice/proj/h/{SHA}/")
+        resp = await client.get(f"/raw/alice/proj/h/{SHA}/")
         assert resp.status_code == 200
         assert "report" in resp.text
 
     async def test_404_when_missing(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/alice/proj/h/nonexistent1234567/")
+        resp = await client.get("/raw/alice/proj/h/nonexistent1234567/")
         assert resp.status_code == 404
 
 
-class TestHashRawFile:
+class TestRawHashFile:
     async def test_serves_asset(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/alice/proj/h/{SHA}/style.css")
+        resp = await client.get(f"/raw/alice/proj/h/{SHA}/style.css")
         assert resp.status_code == 200
 
     async def test_404_for_missing_file(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/alice/proj/h/{SHA}/nonexistent.js")
+        resp = await client.get(f"/raw/alice/proj/h/{SHA}/nonexistent.js")
         assert resp.status_code == 404
 
 
@@ -808,6 +925,56 @@ class TestIngestReport:
             headers={"x-access-token": "dummy"},
         )
         assert resp.status_code == 400
+
+    async def test_ingest_with_custom_provider_url(
+        self, auth_client: AsyncClient, tmp_data_dir
+    ):
+        tarball = make_tarball_bytes()
+        resp = await auth_client.post(
+            "/reports",
+            data={
+                "owner": "alice",
+                "repo": "proj",
+                "branch": "main",
+                "sha": "prov1234567890abcdef1234567890abcdef12345",
+                "provider_url": "https://gitlab.com",
+            },
+            files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
+            headers={"x-access-token": "dummy"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+
+        # Verify the stored report uses the custom provider_url
+        row = await db.latest_report_for_repo_hash(
+            "alice/proj", "prov1234567890abcdef1234567890abcdef12345"
+        )
+        assert row is not None
+        assert row["provider_url"] == "https://gitlab.com"
+
+    async def test_ingest_without_provider_url_defaults(
+        self, auth_client: AsyncClient, tmp_data_dir
+    ):
+        tarball = make_tarball_bytes()
+        resp = await auth_client.post(
+            "/reports",
+            data={
+                "owner": "alice",
+                "repo": "proj",
+                "branch": "dev",
+                "sha": "dflt1234567890abcdef1234567890abcdef12345",
+            },
+            files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
+            headers={"x-access-token": "dummy"},
+        )
+        assert resp.status_code == 200
+
+        row = await db.latest_report_for_repo_hash(
+            "alice/proj", "dflt1234567890abcdef1234567890abcdef12345"
+        )
+        assert row is not None
+        assert row["provider_url"] == "https://github.com"
 
     async def test_no_auth_returns_401(self, client: AsyncClient, tmp_data_dir):
         """Without monkeypatching, missing token → 401."""

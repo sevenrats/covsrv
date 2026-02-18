@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, Index, Integer, Text, UniqueConstraint
+from sqlalchemy import Float, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+DEFAULT_PROVIDER_URL = "https://github.com"
 
 
 class Base(DeclarativeBase):
@@ -20,6 +22,9 @@ class Report(Base):
     received_ts: Mapped[int] = mapped_column(Integer, nullable=False)
     overall_percent: Mapped[float] = mapped_column(Float, nullable=False)
     report_dir: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_url: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'https://github.com'")
+    )
 
     __table_args__ = (
         UniqueConstraint("repo", "git_hash", name="uq_reports_repo_hash"),

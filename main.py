@@ -22,7 +22,7 @@ from sqlalchemy.exc import IntegrityError
 
 from covsrv import db
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
-from covsrv.models import BranchEvent, Report
+from covsrv.models import DEFAULT_PROVIDER_URL, BranchEvent, Report
 
 _jinja_env = Environment(
     loader=PackageLoader("covsrv", "templates"),
@@ -89,10 +89,16 @@ class ReportIngestDTO:
     repo_full: str
     branch: str
     sha: str
+    provider_url: str
 
     @classmethod
     def from_form(
-        cls, owner: str, repo: str, branch: str, sha: str
+        cls,
+        owner: str,
+        repo: str,
+        branch: str,
+        sha: str,
+        provider_url: str = DEFAULT_PROVIDER_URL,
     ) -> "ReportIngestDTO":
         owner_s, repo_s, repo_full = normalize_owner_repo(owner, repo)
 
@@ -104,8 +110,19 @@ class ReportIngestDTO:
 
         sha_s = normalize_sha(sha)
 
+        purl = (
+            provider_url.strip().rstrip("/")
+            if isinstance(provider_url, str) and provider_url.strip()
+            else DEFAULT_PROVIDER_URL
+        )
+
         return cls(
-            owner=owner_s, repo=repo_s, repo_full=repo_full, branch=branch_s, sha=sha_s
+            owner=owner_s,
+            repo=repo_s,
+            repo_full=repo_full,
+            branch=branch_s,
+            sha=sha_s,
+            provider_url=purl,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -279,6 +296,7 @@ async def ingest_report(
     repo: str = Form(...),
     branch: str = Form(...),
     sha: str = Form(...),
+    provider_url: str = Form(default=DEFAULT_PROVIDER_URL),
     tarball: UploadFile = File(
         ...
     ),  # expects .tar.gz with HTML + coverage.xml at top of html dir
@@ -288,7 +306,7 @@ async def ingest_report(
     token = extract_token(authorization, x_access_token)
     verify_token(token)
 
-    dto = ReportIngestDTO.from_form(owner, repo, branch, sha)
+    dto = ReportIngestDTO.from_form(owner, repo, branch, sha, provider_url)
     received_ts = int(time.time())
 
     repo_fs = repo_to_fs(dto.repo_full)
@@ -343,6 +361,7 @@ async def ingest_report(
             received_ts=received_ts,
             overall_percent=overall_percent,
             report_dir=str(report_dir),
+            provider_url=dto.provider_url,
         )
         sess.add(report)
         try:
@@ -376,9 +395,9 @@ async def ingest_report(
         "received_ts": received_ts,
         "overall_percent": overall_percent,
         "hash_dashboard_url": f"/{dto.owner}/{dto.repo}/h/{dto.sha}",
+        "hash_chart_url": f"/{dto.owner}/{dto.repo}/h/{dto.sha}/chart",
         "branch_dashboard_url": f"/{dto.owner}/{dto.repo}/b/{dto.branch}",
-        "hash_raw_url": f"/{dto.owner}/{dto.repo}/h/{dto.sha}/raw/",
-        "branch_raw_url": f"/{dto.owner}/{dto.repo}/b/{dto.branch}/raw/",
+        "hash_raw_url": f"/raw/{dto.owner}/{dto.repo}/h/{dto.sha}/",
     }
 
 
@@ -387,19 +406,25 @@ async def ingest_report(
 # ----------------------------
 
 
-def dashboard_html_for(kind: str, repo_full: str, ref: str) -> str:
+def dashboard_html_for(
+    kind: str, repo_full: str, ref: str, provider_url: str = DEFAULT_PROVIDER_URL
+) -> str:
     owner, name = repo_full.split("/", 1)
+    base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
+    github_url = f"{base}/{owner}/{name}"
 
     if kind == "h":
         raw_url = f"/{owner}/{name}/h/"
         trend_url = f"/api/{owner}/{name}/h/{ref}/trend"
         uncovered_url = f"/api/{owner}/{name}/h/{ref}/latest/uncovered-lines"
         download_suffix = f"/{owner}/{name}/h/{ref}"
+        raw_framed_url = f"/{owner}/{name}/h/{ref}"
     else:
         raw_url = f"/{owner}/{name}/h/"
         trend_url = f"/api/{owner}/{name}/b/{ref}/trend"
         uncovered_url = f"/api/{owner}/{name}/b/{ref}/latest/uncovered-lines"
         download_suffix = f"/{owner}/{name}/b/{ref}"
+        raw_framed_url = ""
 
     template = _jinja_env.get_template("dashboard.html")
     return template.render(
@@ -409,6 +434,9 @@ def dashboard_html_for(kind: str, repo_full: str, ref: str) -> str:
         download_suffix=download_suffix,
         trend_limit=TREND_LIMIT,
         pie_limit=DEFAULT_PIE_FILES,
+        github_url=github_url,
+        back_url=github_url,
+        raw_framed_url=raw_framed_url,
     )
 
 
@@ -475,22 +503,17 @@ async def repo_home(owner: str, name: str) -> RedirectResponse:
 @app.get("/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse)
 async def repo_branch_dashboard(owner: str, name: str, branch: str) -> str:
     repo_full = repo_from_owner_name(owner, name)
-    return dashboard_html_for("b", repo_full, branch)
-
-
-# @app.get("/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse)
-# def repo_hash_dashboard(owner: str, name: str, git_hash: str) -> str:
-#    repo_full = repo_from_owner_name(owner, name)
-#    return dashboard_html_for("h", repo_full, git_hash)
-
-
-# ----------------------------
-# Raw HTML serving (FIXED)
-# ----------------------------
+    provider_url = DEFAULT_PROVIDER_URL
+    head_hash = await db.latest_branch_head_hash(repo_full, branch)
+    if head_hash:
+        row = await db.latest_report_for_repo_hash(repo_full, head_hash)
+        if row and row.get("provider_url"):
+            provider_url = row["provider_url"]
+    return dashboard_html_for("b", repo_full, branch, provider_url=provider_url)
 
 
 # ----------------------------
-# Hash views serve raw HTML (no /raw/), WITH trailing slash
+# Raw HTML reports at /raw/... (served as-is from disk)
 # ----------------------------
 
 
@@ -499,15 +522,13 @@ def report_html_root_for_hash(repo_full: str, git_hash: str) -> Path:
     return REPORTS_DIR / repo_fs / "h" / git_hash / "html"
 
 
-# Redirect /h/<sha> -> /h/<sha>/ so relative asset URLs work
-@app.get("/{owner}/{name}/h/{git_hash}")
-async def hash_raw_redirect(owner: str, name: str, git_hash: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/{owner}/{name}/h/{git_hash}/", status_code=307)
+@app.get("/raw/{owner}/{name}/h/{git_hash}")
+async def raw_hash_redirect(owner: str, name: str, git_hash: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/raw/{owner}/{name}/h/{git_hash}/", status_code=307)
 
 
-# Serve the report index at /h/<sha>/
-@app.get("/{owner}/{name}/h/{git_hash}/")
-async def hash_raw_index(owner: str, name: str, git_hash: str) -> FileResponse:
+@app.get("/raw/{owner}/{name}/h/{git_hash}/")
+async def raw_hash_index(owner: str, name: str, git_hash: str) -> FileResponse:
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(repo_full, git_hash)
     index = root / "index.html"
@@ -516,9 +537,8 @@ async def hash_raw_index(owner: str, name: str, git_hash: str) -> FileResponse:
     return FileResponse(path=str(index))
 
 
-# Serve any asset under /h/<sha>/<path>
-@app.get("/{owner}/{name}/h/{git_hash}/{path:path}")
-async def hash_raw_file(
+@app.get("/raw/{owner}/{name}/h/{git_hash}/{path:path}")
+async def raw_hash_file(
     owner: str, name: str, git_hash: str, path: str
 ) -> FileResponse:
     repo_full = repo_from_owner_name(owner, name)
@@ -532,26 +552,47 @@ async def hash_raw_file(
     return FileResponse(path=str(p))
 
 
-"""@app.get("/{owner}/{name}/b/{branch:path}/raw/")
-def branch_raw_index(owner: str, name: str, branch: str) -> FileResponse:
-    repo_full = repo_from_owner_name(owner, name)
-    head_hash = latest_branch_head_hash(repo_full, branch)
-    if head_hash is None:
-        raise HTTPException(
-            status_code=404, detail="No branch head for this branch yet"
-        )
-    return hash_raw_index(owner, name, head_hash)
+# ----------------------------
+# Framed raw view (nav bar + iframe)
+# ----------------------------
 
 
-@app.get("/{owner}/{name}/b/{branch:path}/raw/{path:path}")
-def branch_raw_file(owner: str, name: str, branch: str, path: str) -> FileResponse:
+def framed_html_for(
+    repo_full: str, git_hash: str, provider_url: str = DEFAULT_PROVIDER_URL
+) -> str:
+    owner, name = repo_full.split("/", 1)
+    base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
+    github_url = f"{base}/{owner}/{name}"
+    chart_url = f"/{owner}/{name}/h/{git_hash}/chart"
+    raw_src = f"/raw/{owner}/{name}/h/{git_hash}/"
+
+    template = _jinja_env.get_template("framed_raw.html")
+    return template.render(
+        github_url=github_url,
+        chart_url=chart_url,
+        back_url=chart_url,
+        raw_src=raw_src,
+    )
+
+
+@app.get("/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse)
+async def repo_hash_framed(owner: str, name: str, git_hash: str) -> str:
     repo_full = repo_from_owner_name(owner, name)
-    head_hash = latest_branch_head_hash(repo_full, branch)
-    if head_hash is None:
-        raise HTTPException(
-            status_code=404, detail="No branch head for this branch yet"
-        )
-    return hash_raw_file(owner, name, head_hash, path)"""
+    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
+    provider_url = (
+        row["provider_url"] if row and row.get("provider_url") else DEFAULT_PROVIDER_URL
+    )
+    return framed_html_for(repo_full, git_hash, provider_url=provider_url)
+
+
+@app.get("/{owner}/{name}/h/{git_hash}/chart", response_class=HTMLResponse)
+async def repo_hash_chart(owner: str, name: str, git_hash: str) -> str:
+    repo_full = repo_from_owner_name(owner, name)
+    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
+    provider_url = (
+        row["provider_url"] if row and row.get("provider_url") else DEFAULT_PROVIDER_URL
+    )
+    return dashboard_html_for("h", repo_full, git_hash, provider_url=provider_url)
 
 
 # ----------------------------

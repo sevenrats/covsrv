@@ -115,6 +115,25 @@ class TestLatestReportForRepoHash:
         assert row is not None
         assert row["overall_percent"] == 85.5
         assert row["git_hash"] == "abc1234567"
+        assert row["provider_url"] == "https://github.com"  # server default
+
+    async def test_returns_custom_provider_url(self, initialized_db):
+        async with db.session() as sess:
+            sess.add(
+                Report(
+                    repo="owner/repo",
+                    branch_name="main",
+                    git_hash="def7654321",
+                    received_ts=2000,
+                    overall_percent=90.0,
+                    report_dir="/tmp/r2",
+                    provider_url="https://gitlab.com",
+                )
+            )
+
+        row = await db.latest_report_for_repo_hash("owner/repo", "def7654321")
+        assert row is not None
+        assert row["provider_url"] == "https://gitlab.com"
 
     async def test_different_hash_not_found(self, initialized_db):
         async with db.session() as sess:
