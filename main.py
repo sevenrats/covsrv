@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import sqlite3
@@ -7,17 +8,20 @@ import tarfile
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
+from covsrv import sql
+from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
 from covsrv.html import CHART_VIEW
-from covsrv.sql import INIT_DB, UPSERT_REPO_SEEN
 
 # ----------------------------
 # Configuration
@@ -130,9 +134,9 @@ def verify_token(token: str) -> None:
 # ----------------------------
 
 
-def init_dirs() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+async def init_dirs() -> None:
+    await anyio.Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+    await anyio.Path(REPORTS_DIR).mkdir(parents=True, exist_ok=True)
 
 
 def repo_to_fs(repo_full: str) -> str:
@@ -167,31 +171,20 @@ def safe_extract_tar(tar_path: Path, dest_dir: Path) -> None:
                 and member_path != dest
             ):
                 raise HTTPException(status_code=400, detail="tar contains unsafe paths")
-        tf.extractall(dest)
+        tf.extractall(dest, filter="data")
 
 
 # ----------------------------
-# DB
+# Lifespan (async startup)
 # ----------------------------
 
 
-def db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db() -> None:
-    with db_connect() as conn:
-        conn.executescript(INIT_DB)
-
-
-def upsert_repo_seen(conn: sqlite3.Connection, repo: str, ts: int) -> None:
-    conn.execute(
-        UPSERT_REPO_SEEN,
-        (repo, ts, ts),
-    )
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # noqa: ARG001
+    await init_dirs()
+    sql.configure(DB_PATH)
+    await sql.init_db()
+    yield
 
 
 # ----------------------------
@@ -260,65 +253,14 @@ def parse_coverage_xml(xml_path: Path) -> tuple[float, list[XmlFileStat]]:
 
 
 # ----------------------------
-# Query helpers
-# ----------------------------
-
-
-def latest_report_for_repo_hash(repo: str, git_hash: str) -> sqlite3.Row | None:
-    with db_connect() as conn:
-        return conn.execute(
-            "SELECT * FROM reports WHERE repo = ? AND git_hash = ? LIMIT 1;",
-            (repo, git_hash),
-        ).fetchone()
-
-
-def latest_branch_head_hash(repo: str, branch_name: str) -> str | None:
-    with db_connect() as conn:
-        row = conn.execute(
-            "SELECT current_hash FROM branch_heads WHERE repo = ? AND branch_name = ? LIMIT 1;",
-            (repo, branch_name),
-        ).fetchone()
-        return None if row is None else str(row["current_hash"])
-
-
-def branch_events_for(repo: str, branch_name: str, limit: int) -> list[sqlite3.Row]:
-    with db_connect() as conn:
-        return conn.execute(
-            """
-            SELECT id, git_hash, updated_ts
-            FROM branch_events
-            WHERE repo = ? AND branch_name = ?
-            ORDER BY updated_ts ASC, id ASC
-            LIMIT ?;
-            """,
-            (repo, branch_name, limit),
-        ).fetchall()
-
-
-def reports_trend_for_repo_hash(
-    repo: str, git_hash: str, limit: int
-) -> list[sqlite3.Row]:
-    with db_connect() as conn:
-        return conn.execute(
-            """
-            SELECT git_hash, received_ts, overall_percent
-            FROM reports
-            WHERE repo = ? AND git_hash = ?
-            ORDER BY received_ts ASC, id ASC
-            LIMIT ?;
-            """,
-            (repo, git_hash, limit),
-        ).fetchall()
-
-
-# ----------------------------
 # App setup
 # ----------------------------
 
-init_dirs()
-init_db()
-
-app = FastAPI(title="Coverage Server + Dashboard (single report ingest)", version="7.0")
+app = FastAPI(
+    title="Coverage Server + Dashboard (single report ingest)",
+    version="7.0",
+    lifespan=lifespan,
+)
 
 # ----------------------------
 # NEW: Single reports ingest endpoint
@@ -347,15 +289,15 @@ async def ingest_report(
 
     # Immutable location: reports/<repo>/h/<sha>/
     report_dir = REPORTS_DIR / repo_fs / "h" / dto.sha
-    if report_dir.exists():
+    if await anyio.Path(report_dir).exists():
         # preserve "original" report for that commit hash
         raise HTTPException(
             status_code=409, detail="Report for this (repo, sha) already exists"
         )
 
-    report_dir.mkdir(parents=True, exist_ok=True)
+    await anyio.Path(report_dir).mkdir(parents=True, exist_ok=True)
     html_dir = report_dir / "html"
-    html_dir.mkdir(parents=True, exist_ok=True)
+    await anyio.Path(html_dir).mkdir(parents=True, exist_ok=True)
 
     # save upload to temp file then extract safely
     with tempfile.TemporaryDirectory(prefix="covsrv_upload_") as tmp:
@@ -363,20 +305,20 @@ async def ingest_report(
         tar_path = tmp_path / "artifact.tar.gz"
 
         try:
-            with tar_path.open("wb") as f:
+            async with await anyio.open_file(tar_path, "wb") as f:
                 while True:
                     chunk = await tarball.read(1024 * 1024)
                     if not chunk:
                         break
-                    f.write(chunk)
+                    await f.write(chunk)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to read upload: {e}")
 
-        safe_extract_tar(tar_path, html_dir)
+        await asyncio.to_thread(safe_extract_tar, tar_path, html_dir)
 
     # required: coverage.xml must be inside extracted html dir
     xml_path = html_dir / "coverage.xml"
-    if not xml_path.exists():
+    if not await anyio.Path(xml_path).exists():
         # cleanup the partially created report_dir
         shutil.rmtree(report_dir, ignore_errors=True)
         raise HTTPException(
@@ -384,12 +326,12 @@ async def ingest_report(
             detail="Tarball must contain coverage.xml at the top of the HTML directory",
         )
 
-    overall_percent, _ = parse_coverage_xml(xml_path)
+    overall_percent, _ = await asyncio.to_thread(parse_coverage_xml, xml_path)
 
     # DB: insert report + update branch head + add branch event
-    with db_connect() as conn:
+    async with sql.connection() as conn:
         try:
-            conn.execute(
+            await conn.execute(
                 """
                 INSERT INTO reports(repo, branch_name, git_hash, received_ts, overall_percent, report_dir)
                 VALUES(?,?,?,?,?,?);
@@ -410,11 +352,11 @@ async def ingest_report(
                 status_code=409, detail="Report for this (repo, sha) already exists"
             )
 
-        conn.execute(
+        await conn.execute(
             "INSERT INTO branch_events(repo, branch_name, git_hash, updated_ts) VALUES(?,?,?,?);",
             (dto.repo_full, dto.branch, dto.sha, received_ts),
         )
-        conn.execute(
+        await conn.execute(
             """
             INSERT INTO branch_heads(repo, branch_name, current_hash, updated_ts)
             VALUES(?,?,?,?)
@@ -425,7 +367,7 @@ async def ingest_report(
             (dto.repo_full, dto.branch, dto.sha, received_ts),
         )
 
-        upsert_repo_seen(conn, dto.repo_full, received_ts)
+        await sql.upsert_repo_seen(conn, dto.repo_full, received_ts)
 
     return {
         "status": "ok",
@@ -483,17 +425,67 @@ def dashboard_html_for(kind: str, repo_full: str, ref: str) -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def root() -> RedirectResponse:
+async def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
 
 
+@app.get("/badge/{owner}/{name}/h/{git_hash}")
+async def badge_hash_svg(
+    owner: str,
+    name: str,
+    git_hash: str,
+    label: str = "coverage",
+    decimals: int = 1,
+) -> Response:
+    repo_full = repo_from_owner_name(owner, name)
+    row = await sql.latest_report_for_repo_hash(repo_full, git_hash)
+
+    percent = None if row is None else float(row["overall_percent"])
+    msg = coverage_message(percent, decimals=max(0, min(int(decimals), 3)))
+    color = badge_color(percent)
+
+    svg = render_badge_svg(label=label, message=msg, color=color)
+
+    # hash badges are immutable: can cache hard
+    cache = "public, max-age=31536000, immutable"
+    seed = f"h|{repo_full}|{git_hash}|{label}|{decimals}|{msg}|{color}"
+    return svg_response(svg, cache_control=cache, etag_seed=seed)
+
+
+@app.get("/badge/{owner}/{name}/b/{branch:path}")
+async def badge_branch_svg(
+    owner: str,
+    name: str,
+    branch: str,
+    label: str = "coverage",
+    decimals: int = 1,
+) -> Response:
+    repo_full = repo_from_owner_name(owner, name)
+    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
+
+    percent: float | None = None
+    if head_hash is not None:
+        row = await sql.latest_report_for_repo_hash(repo_full, head_hash)
+        if row is not None:
+            percent = float(row["overall_percent"])
+
+    msg = coverage_message(percent, decimals=max(0, min(int(decimals), 3)))
+    color = badge_color(percent)
+    svg = render_badge_svg(label=label, message=msg, color=color)
+
+    # branch badges move: cache briefly
+    cache = "public, max-age=60"
+    seed = f"b|{repo_full}|{branch}|{head_hash}|{label}|{decimals}|{msg}|{color}"
+    return svg_response(svg, cache_control=cache, etag_seed=seed)
+
+
 @app.get("/{owner}/{name}/", response_class=HTMLResponse)
-def repo_home(owner: str, name: str) -> RedirectResponse:
+async def repo_home(owner: str, name: str) -> RedirectResponse:
     return RedirectResponse(url=f"/{owner}/{name}/b/main")
 
 
 @app.get("/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse)
-def repo_branch_dashboard(owner: str, name: str, branch: str) -> str:
+async def repo_branch_dashboard(owner: str, name: str, branch: str) -> str:
     repo_full = repo_from_owner_name(owner, name)
     return dashboard_html_for("b", repo_full, branch)
 
@@ -521,35 +513,38 @@ def report_html_root_for_hash(repo_full: str, git_hash: str) -> Path:
 
 # Redirect /h/<sha> -> /h/<sha>/ so relative asset URLs work
 @app.get("/{owner}/{name}/h/{git_hash}")
-def hash_raw_redirect(owner: str, name: str, git_hash: str) -> RedirectResponse:
+async def hash_raw_redirect(owner: str, name: str, git_hash: str) -> RedirectResponse:
     return RedirectResponse(url=f"/{owner}/{name}/h/{git_hash}/", status_code=307)
 
 
 # Serve the report index at /h/<sha>/
 @app.get("/{owner}/{name}/h/{git_hash}/")
-def hash_raw_index(owner: str, name: str, git_hash: str) -> FileResponse:
+async def hash_raw_index(owner: str, name: str, git_hash: str) -> FileResponse:
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(repo_full, git_hash)
     index = root / "index.html"
-    if not index.exists():
+    if not await anyio.Path(index).exists():
         raise HTTPException(status_code=404, detail="No raw report for this hash")
     return FileResponse(path=str(index))
 
 
 # Serve any asset under /h/<sha>/<path>
 @app.get("/{owner}/{name}/h/{git_hash}/{path:path}")
-def hash_raw_file(owner: str, name: str, git_hash: str, path: str) -> FileResponse:
+async def hash_raw_file(
+    owner: str, name: str, git_hash: str, path: str
+) -> FileResponse:
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(repo_full, git_hash)
 
     p = safe_join_under(root, path)
-    if not p.exists() or not p.is_file():
+    ap = anyio.Path(p)
+    if not await ap.exists() or not await ap.is_file():
         raise HTTPException(status_code=404, detail="Not found")
 
     return FileResponse(path=str(p))
 
 
-@app.get("/{owner}/{name}/b/{branch:path}/raw/")
+"""@app.get("/{owner}/{name}/b/{branch:path}/raw/")
 def branch_raw_index(owner: str, name: str, branch: str) -> FileResponse:
     repo_full = repo_from_owner_name(owner, name)
     head_hash = latest_branch_head_hash(repo_full, branch)
@@ -568,7 +563,7 @@ def branch_raw_file(owner: str, name: str, branch: str, path: str) -> FileRespon
         raise HTTPException(
             status_code=404, detail="No branch head for this branch yet"
         )
-    return hash_raw_file(owner, name, head_hash, path)
+    return hash_raw_file(owner, name, head_hash, path)"""
 
 
 # ----------------------------
@@ -576,8 +571,8 @@ def branch_raw_file(owner: str, name: str, branch: str, path: str) -> FileRespon
 # ----------------------------
 
 
-def report_html_root_for_branch(repo_full: str, branch: str) -> Path:
-    head_hash = latest_branch_head_hash(repo_full, branch)
+async def report_html_root_for_branch(repo_full: str, branch: str) -> Path:
+    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
     if head_hash is None:
         raise HTTPException(
             status_code=404, detail="No branch head for this branch yet"
@@ -592,7 +587,7 @@ def tar_gz_dir(src_dir: Path, out_path: Path) -> None:
                 tf.add(p, arcname=str(p.relative_to(src_dir)))
 
 
-def resolve_download_token(root: Path, token: str) -> tuple[str, Path]:
+async def resolve_download_token(root: Path, token: str) -> tuple[str, Path]:
     """
     Maps token -> actual file or directory.
     Returns (kind, path) where kind is "file" or "archive".
@@ -600,36 +595,31 @@ def resolve_download_token(root: Path, token: str) -> tuple[str, Path]:
 
     token = token.lower().strip()
 
-    if token == "json":
-        p = root / "coverage.json"
-        if not p.exists():
-            raise HTTPException(status_code=404, detail="coverage.json not found")
-        return "file", p
+    TOKENS: dict[str, str] = {
+        "json": "coverage.json",
+        "lcov": "coverage.lcov",
+        "xml": "coverage.xml",
+    }
 
-    if token == "lcov":
-        p = root / "coverage.lcov"
-        if not p.exists():
-            raise HTTPException(status_code=404, detail="coverage.lcov not found")
-        return "file", p
+    fname = TOKENS.get(token)
+    if fname is None:
+        raise HTTPException(status_code=404, detail="Unknown download token")
 
-    if token == "xml":
-        p = root / "coverage.xml"
-        if not p.exists():
-            raise HTTPException(status_code=404, detail="coverage.xml not found")
-        return "file", p
-
-    raise HTTPException(status_code=404, detail="Unknown download token")
+    p = root / fname
+    if not await anyio.Path(p).exists():
+        raise HTTPException(status_code=404, detail=f"{fname} not found")
+    return "file", p
 
 
 @app.get("/download/{token}/{owner}/{name}/h/{git_hash}")
-def hash_download_token(owner: str, name: str, git_hash: str, token: str):
+async def hash_download_token(owner: str, name: str, git_hash: str, token: str):
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(repo_full, git_hash)
 
-    if not root.exists():
+    if not await anyio.Path(root).exists():
         raise HTTPException(status_code=404, detail="No report for this hash")
 
-    kind, target = resolve_download_token(root, token)
+    kind, target = await resolve_download_token(root, token)
 
     if kind == "file":
         return FileResponse(path=str(target), filename=target.name)
@@ -640,7 +630,7 @@ def hash_download_token(owner: str, name: str, git_hash: str, token: str):
     ) as tmp:
         tmp_path = Path(tmp.name)
 
-    tar_gz_dir(target, tmp_path)
+    await asyncio.to_thread(tar_gz_dir, target, tmp_path)
 
     filename = f"{repo_to_fs(repo_full)}-h-{git_hash}-html.tar.gz"
 
@@ -652,14 +642,14 @@ def hash_download_token(owner: str, name: str, git_hash: str, token: str):
 
 
 @app.get("/download/{token}/{owner}/{name}/b/{branch:path}")
-def branch_download_token(owner: str, name: str, branch: str, token: str):
+async def branch_download_token(owner: str, name: str, branch: str, token: str):
     repo_full = repo_from_owner_name(owner, name)
-    root = report_html_root_for_branch(repo_full, branch)
+    root = await report_html_root_for_branch(repo_full, branch)
 
-    if not root.exists():
+    if not await anyio.Path(root).exists():
         raise HTTPException(status_code=404, detail="No report for this branch head")
 
-    kind, target = resolve_download_token(root, token)
+    kind, target = await resolve_download_token(root, token)
 
     if kind == "file":
         return FileResponse(path=str(target), filename=target.name)
@@ -669,7 +659,7 @@ def branch_download_token(owner: str, name: str, branch: str, token: str):
     ) as tmp:
         tmp_path = Path(tmp.name)
 
-    tar_gz_dir(target, tmp_path)
+    await asyncio.to_thread(tar_gz_dir, target, tmp_path)
 
     safe_branch = branch.replace("/", "_")
     filename = f"{repo_to_fs(repo_full)}-b-{safe_branch}-html.tar.gz"
@@ -687,44 +677,36 @@ def branch_download_token(owner: str, name: str, branch: str, token: str):
 
 
 @app.get("/api/{owner}/{name}/h/{git_hash}/trend")
-def api_repo_hash_trend(
+async def api_repo_hash_trend(
     owner: str, name: str, git_hash: str, limit: int = TREND_LIMIT
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
-    rows = reports_trend_for_repo_hash(repo_full, git_hash, limit)
-    points = [
-        {
-            "git_hash": r["git_hash"],
-            "received_ts": int(r["received_ts"]),
-            "overall_percent": float(r["overall_percent"]),
-        }
-        for r in rows
-    ]
+    points = await sql.reports_trend_for_repo_hash(repo_full, git_hash, limit)
     return JSONResponse(
         {"repo": repo_full, "kind": "hash", "ref": git_hash, "points": points}
     )
 
 
-def latest_stats_from_xml(report_dir: Path) -> tuple[float, list[XmlFileStat]]:
+async def latest_stats_from_xml(report_dir: Path) -> tuple[float, list[XmlFileStat]]:
     xml_path = report_dir / "html" / "coverage.xml"
-    if not xml_path.exists():
+    if not await anyio.Path(xml_path).exists():
         return 0.0, []
-    return parse_coverage_xml(xml_path)
+    return await asyncio.to_thread(parse_coverage_xml, xml_path)
 
 
 @app.get("/api/{owner}/{name}/h/{git_hash}/latest/worst-files")
-def api_repo_hash_latest_worst_files(
+async def api_repo_hash_latest_worst_files(
     owner: str, name: str, git_hash: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    row = latest_report_for_repo_hash(repo_full, git_hash)
+    row = await sql.latest_report_for_repo_hash(repo_full, git_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
-    _, files = latest_stats_from_xml(Path(row["report_dir"]))
+    _, files = await latest_stats_from_xml(Path(row["report_dir"]))
     files_sorted = sorted(files, key=lambda x: x.percent_covered)[:limit]
 
     return JSONResponse(
@@ -744,17 +726,17 @@ def api_repo_hash_latest_worst_files(
 
 
 @app.get("/api/{owner}/{name}/h/{git_hash}/latest/uncovered-lines")
-def api_repo_hash_latest_uncovered_lines(
+async def api_repo_hash_latest_uncovered_lines(
     owner: str, name: str, git_hash: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    row = latest_report_for_repo_hash(repo_full, git_hash)
+    row = await sql.latest_report_for_repo_hash(repo_full, git_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
-    _, files = latest_stats_from_xml(Path(row["report_dir"]))
+    _, files = await latest_stats_from_xml(Path(row["report_dir"]))
     files_sorted = sorted(files, key=lambda x: x.uncovered_lines, reverse=True)[:limit]
 
     return JSONResponse(
@@ -779,36 +761,15 @@ def api_repo_hash_latest_uncovered_lines(
 
 
 @app.get("/api/{owner}/{name}/b/{branch:path}/trend")
-def api_repo_branch_trend(
+async def api_repo_branch_trend(
     owner: str, name: str, branch: str, limit: int = TREND_LIMIT
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
 
-    evs = branch_events_for(repo_full, branch, limit)
-    points: list[dict[str, Any]] = []
-
-    with db_connect() as conn:
-        for e in evs:
-            r = conn.execute(
-                """
-                SELECT overall_percent
-                FROM reports
-                WHERE repo = ? AND git_hash = ?
-                LIMIT 1;
-                """,
-                (repo_full, e["git_hash"]),
-            ).fetchone()
-
-            points.append(
-                {
-                    "git_hash": str(e["git_hash"]),
-                    "received_ts": int(e["updated_ts"]),
-                    "overall_percent": float(r["overall_percent"])
-                    if r is not None
-                    else 0.0,
-                }
-            )
+    evs = await sql.branch_events_for(repo_full, branch, limit)
+    hash_ts_pairs = [(e["git_hash"], int(e["updated_ts"])) for e in evs]
+    points = await sql.report_percent_for_hashes(repo_full, hash_ts_pairs)
 
     return JSONResponse(
         {"repo": repo_full, "kind": "branch", "ref": branch, "points": points}
@@ -816,21 +777,21 @@ def api_repo_branch_trend(
 
 
 @app.get("/api/{owner}/{name}/b/{branch:path}/latest/worst-files")
-def api_repo_branch_latest_worst_files(
+async def api_repo_branch_latest_worst_files(
     owner: str, name: str, branch: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    head_hash = latest_branch_head_hash(repo_full, branch)
+    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
     if head_hash is None:
         return JSONResponse({"latest": None, "files": []})
 
-    row = latest_report_for_repo_hash(repo_full, head_hash)
+    row = await sql.latest_report_for_repo_hash(repo_full, head_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
-    _, files = latest_stats_from_xml(Path(row["report_dir"]))
+    _, files = await latest_stats_from_xml(Path(row["report_dir"]))
     files_sorted = sorted(files, key=lambda x: x.percent_covered)[:limit]
 
     return JSONResponse(
@@ -850,21 +811,21 @@ def api_repo_branch_latest_worst_files(
 
 
 @app.get("/api/{owner}/{name}/b/{branch:path}/latest/uncovered-lines")
-def api_repo_branch_latest_uncovered_lines(
+async def api_repo_branch_latest_uncovered_lines(
     owner: str, name: str, branch: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    head_hash = latest_branch_head_hash(repo_full, branch)
+    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
     if head_hash is None:
         return JSONResponse({"latest": None, "files": []})
 
-    row = latest_report_for_repo_hash(repo_full, head_hash)
+    row = await sql.latest_report_for_repo_hash(repo_full, head_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
-    _, files = latest_stats_from_xml(Path(row["report_dir"]))
+    _, files = await latest_stats_from_xml(Path(row["report_dir"]))
     files_sorted = sorted(files, key=lambda x: x.uncovered_lines, reverse=True)[:limit]
 
     return JSONResponse(
