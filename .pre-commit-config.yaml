@@ -1,4 +1,14 @@
 repos:
+  - repo: local
+    hooks:
+      - id: ty-check
+        name: ty – type check
+        entry: bash -c 'uv run ty check'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit, pre-push]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.3
     hooks:
@@ -14,6 +24,15 @@ repos:
 
       - id: ruff-format
         name: ruff – format code
+        stages: [pre-commit, pre-push]
+
+  - repo: local
+    hooks:
+      - id: run-pytest
+        name: uv run pytest
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
         stages: [pre-commit, pre-push]
 
 #  - repo: local
