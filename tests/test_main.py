@@ -14,7 +14,8 @@ from httpx import ASGITransport, AsyncClient
 
 # We import from main at function/class level so the module is available
 import main as app_module
-from covsrv import sql
+from covsrv import db
+from covsrv.models import BranchEvent, BranchHead, Report
 from tests.conftest import SAMPLE_COVERAGE_XML, make_tarball_bytes
 
 # =====================================================================
@@ -399,23 +400,42 @@ async def seed_report(
     (html_dir / "index.html").write_text("<html><body>report</body></html>")
     (html_dir / "style.css").write_text("body{}")
 
-    async with sql.connection() as conn:
-        await conn.execute(
-            "INSERT INTO reports(repo, branch_name, git_hash, received_ts, overall_percent, report_dir) "
-            "VALUES(?,?,?,?,?,?);",
-            (repo_full, branch, sha, received_ts, overall_percent, str(report_dir)),
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    async with db.session() as sess:
+        sess.add(
+            Report(
+                repo=repo_full,
+                branch_name=branch,
+                git_hash=sha,
+                received_ts=received_ts,
+                overall_percent=overall_percent,
+                report_dir=str(report_dir),
+            )
         )
-        await conn.execute(
-            "INSERT INTO branch_heads(repo, branch_name, current_hash, updated_ts) "
-            "VALUES(?,?,?,?) "
-            "ON CONFLICT(repo, branch_name) DO UPDATE SET current_hash=excluded.current_hash, updated_ts=excluded.updated_ts;",
-            (repo_full, branch, sha, received_ts),
+        stmt = sqlite_insert(BranchHead).values(
+            repo=repo_full,
+            branch_name=branch,
+            current_hash=sha,
+            updated_ts=received_ts,
         )
-        await conn.execute(
-            "INSERT INTO branch_events(repo, branch_name, git_hash, updated_ts) VALUES(?,?,?,?);",
-            (repo_full, branch, sha, received_ts),
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[BranchHead.repo, BranchHead.branch_name],
+            set_={
+                "current_hash": stmt.excluded.current_hash,
+                "updated_ts": stmt.excluded.updated_ts,
+            },
         )
-        await sql.upsert_repo_seen(conn, repo_full, received_ts)
+        await sess.execute(stmt)
+        sess.add(
+            BranchEvent(
+                repo=repo_full,
+                branch_name=branch,
+                git_hash=sha,
+                updated_ts=received_ts,
+            )
+        )
+        await db.upsert_repo_seen(sess, repo_full, received_ts)
 
     return report_dir
 
@@ -718,7 +738,7 @@ class TestDownloads:
 
 class TestIngestReport:
     @pytest_asyncio.fixture()
-    async def auth_client(self, db, tmp_data_dir):
+    async def auth_client(self, initialized_db, tmp_data_dir):
         """Client with extract_token and verify_token monkeypatched to bypass auth."""
         with (
             patch.object(app_module, "extract_token", return_value="dummy-token"),

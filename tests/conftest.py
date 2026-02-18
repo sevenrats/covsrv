@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from covsrv import sql
+from covsrv import db
 
 # ---------------------------------------------------------------------------
 # Sample Cobertura XML
@@ -109,12 +109,13 @@ def tmp_data_dir(tmp_path: Path):
 
 
 @pytest_asyncio.fixture()
-async def db(tmp_data_dir: Path):
-    """Configure sql module against a fresh temp DB and initialise tables."""
+async def initialized_db(tmp_data_dir: Path):
+    """Configure db module against a fresh temp DB and initialise tables."""
     db_path = tmp_data_dir / "covsrv_data" / "covsrv.sqlite3"
-    sql.configure(db_path)
-    await sql.init_db()
+    db.configure(db_path)
+    await db.init_db()
     yield db_path
+    await db.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ async def db(tmp_data_dir: Path):
 
 
 @pytest_asyncio.fixture()
-async def client(db: Path):
+async def client(initialized_db: Path):
     """Async httpx client wired to the FastAPI app (no lifespan)."""
     import main as app_module
 

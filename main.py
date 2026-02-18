@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import sqlite3
 import tarfile
 import tempfile
 import time
@@ -18,10 +17,12 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy.exc import IntegrityError
 
-from covsrv import sql
+from covsrv import db
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
 from covsrv.html import CHART_VIEW
+from covsrv.models import BranchEvent, Report
 
 # ----------------------------
 # Configuration
@@ -182,8 +183,8 @@ def safe_extract_tar(tar_path: Path, dest_dir: Path) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     await init_dirs()
-    sql.configure(DB_PATH)
-    await sql.init_db()
+    db.configure(DB_PATH)
+    await db.init_db()
     yield
 
 
@@ -329,45 +330,37 @@ async def ingest_report(
     overall_percent, _ = await asyncio.to_thread(parse_coverage_xml, xml_path)
 
     # DB: insert report + update branch head + add branch event
-    async with sql.connection() as conn:
+    async with db.session() as sess:
+        report = Report(
+            repo=dto.repo_full,
+            branch_name=dto.branch,
+            git_hash=dto.sha,
+            received_ts=received_ts,
+            overall_percent=overall_percent,
+            report_dir=str(report_dir),
+        )
+        sess.add(report)
         try:
-            await conn.execute(
-                """
-                INSERT INTO reports(repo, branch_name, git_hash, received_ts, overall_percent, report_dir)
-                VALUES(?,?,?,?,?,?);
-                """,
-                (
-                    dto.repo_full,
-                    dto.branch,
-                    dto.sha,
-                    received_ts,
-                    overall_percent,
-                    str(report_dir),
-                ),
-            )
-        except sqlite3.IntegrityError:
+            await sess.flush()
+        except IntegrityError:
             # unique (repo, sha) collision (race)
             shutil.rmtree(report_dir, ignore_errors=True)
             raise HTTPException(
                 status_code=409, detail="Report for this (repo, sha) already exists"
             )
 
-        await conn.execute(
-            "INSERT INTO branch_events(repo, branch_name, git_hash, updated_ts) VALUES(?,?,?,?);",
-            (dto.repo_full, dto.branch, dto.sha, received_ts),
+        sess.add(
+            BranchEvent(
+                repo=dto.repo_full,
+                branch_name=dto.branch,
+                git_hash=dto.sha,
+                updated_ts=received_ts,
+            )
         )
-        await conn.execute(
-            """
-            INSERT INTO branch_heads(repo, branch_name, current_hash, updated_ts)
-            VALUES(?,?,?,?)
-            ON CONFLICT(repo, branch_name) DO UPDATE SET
-                current_hash=excluded.current_hash,
-                updated_ts=excluded.updated_ts;
-            """,
-            (dto.repo_full, dto.branch, dto.sha, received_ts),
+        await db.upsert_branch_head(
+            sess, dto.repo_full, dto.branch, dto.sha, received_ts
         )
-
-        await sql.upsert_repo_seen(conn, dto.repo_full, received_ts)
+        await db.upsert_repo_seen(sess, dto.repo_full, received_ts)
 
     return {
         "status": "ok",
@@ -438,7 +431,7 @@ async def badge_hash_svg(
     decimals: int = 1,
 ) -> Response:
     repo_full = repo_from_owner_name(owner, name)
-    row = await sql.latest_report_for_repo_hash(repo_full, git_hash)
+    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
 
     percent = None if row is None else float(row["overall_percent"])
     msg = coverage_message(percent, decimals=max(0, min(int(decimals), 3)))
@@ -461,11 +454,11 @@ async def badge_branch_svg(
     decimals: int = 1,
 ) -> Response:
     repo_full = repo_from_owner_name(owner, name)
-    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(repo_full, branch)
 
     percent: float | None = None
     if head_hash is not None:
-        row = await sql.latest_report_for_repo_hash(repo_full, head_hash)
+        row = await db.latest_report_for_repo_hash(repo_full, head_hash)
         if row is not None:
             percent = float(row["overall_percent"])
 
@@ -572,7 +565,7 @@ def branch_raw_file(owner: str, name: str, branch: str, path: str) -> FileRespon
 
 
 async def report_html_root_for_branch(repo_full: str, branch: str) -> Path:
-    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(repo_full, branch)
     if head_hash is None:
         raise HTTPException(
             status_code=404, detail="No branch head for this branch yet"
@@ -682,7 +675,7 @@ async def api_repo_hash_trend(
 ) -> JSONResponse:
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
-    points = await sql.reports_trend_for_repo_hash(repo_full, git_hash, limit)
+    points = await db.reports_trend_for_repo_hash(repo_full, git_hash, limit)
     return JSONResponse(
         {"repo": repo_full, "kind": "hash", "ref": git_hash, "points": points}
     )
@@ -702,7 +695,7 @@ async def api_repo_hash_latest_worst_files(
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    row = await sql.latest_report_for_repo_hash(repo_full, git_hash)
+    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
@@ -732,7 +725,7 @@ async def api_repo_hash_latest_uncovered_lines(
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    row = await sql.latest_report_for_repo_hash(repo_full, git_hash)
+    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
@@ -767,9 +760,9 @@ async def api_repo_branch_trend(
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
 
-    evs = await sql.branch_events_for(repo_full, branch, limit)
+    evs = await db.branch_events_for(repo_full, branch, limit)
     hash_ts_pairs = [(e["git_hash"], int(e["updated_ts"])) for e in evs]
-    points = await sql.report_percent_for_hashes(repo_full, hash_ts_pairs)
+    points = await db.report_percent_for_hashes(repo_full, hash_ts_pairs)
 
     return JSONResponse(
         {"repo": repo_full, "kind": "branch", "ref": branch, "points": points}
@@ -783,11 +776,11 @@ async def api_repo_branch_latest_worst_files(
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(repo_full, branch)
     if head_hash is None:
         return JSONResponse({"latest": None, "files": []})
 
-    row = await sql.latest_report_for_repo_hash(repo_full, head_hash)
+    row = await db.latest_report_for_repo_hash(repo_full, head_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
@@ -817,11 +810,11 @@ async def api_repo_branch_latest_uncovered_lines(
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    head_hash = await sql.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(repo_full, branch)
     if head_hash is None:
         return JSONResponse({"latest": None, "files": []})
 
-    row = await sql.latest_report_for_repo_hash(repo_full, head_hash)
+    row = await db.latest_report_for_repo_hash(repo_full, head_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
