@@ -1,4 +1,4 @@
-CHART_VIEW = """<!doctype html>
+<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -119,9 +119,9 @@ CHART_VIEW = """<!doctype html>
         Uncovered-lines are from the latest report for this ref. Trend is historical.
       </span>
 
-      <a class="btn" href="/download/json__DOWNLOAD_SUFFIX__">JSON</a>
-      <a class="btn" href="/download/lcov__DOWNLOAD_SUFFIX__">LCOV</a>
-      <a class="btn" href="/download/xml__DOWNLOAD_SUFFIX__">XML</a>
+      <a class="btn" href="/download/json{{ download_suffix }}">JSON</a>
+      <a class="btn" href="/download/lcov{{ download_suffix }}">LCOV</a>
+      <a class="btn" href="/download/xml{{ download_suffix }}">XML</a>
     </div>
 
     <div class="grid">
@@ -140,12 +140,12 @@ CHART_VIEW = """<!doctype html>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
       async function loadTrend() {
-        const res = await fetch("__TREND_URL__?limit=__TREND_LIMIT__");
+        const res = await fetch("{{ trend_url }}?limit={{ trend_limit }}");
         return await res.json();
       }
 
       async function loadUncovered() {
-        const res = await fetch("__UNCOVERED_URL__?limit=__PIE_LIMIT__");
+        const res = await fetch("{{ uncovered_url }}?limit={{ pie_limit }}");
         return await res.json();
       }
 
@@ -167,7 +167,7 @@ CHART_VIEW = """<!doctype html>
         const latest = uncovered && uncovered.latest ? uncovered.latest : null;
 
         if (latest) {
-          const rawUrl = "__RAW_URL__" + latest.git_hash + "/"; // html templates will append the hash to this
+          const rawUrl = "{{ raw_url }}" + latest.git_hash + "/";
           meta.innerHTML =
             `Latest: ${latest.repo} @ ` +
             `<a href="${rawUrl}">${latest.git_hash}</a> · ` +
@@ -219,5 +219,3 @@ CHART_VIEW = """<!doctype html>
     </script>
   </body>
 </html>
-
-"""

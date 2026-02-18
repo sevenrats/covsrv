@@ -344,29 +344,24 @@ class TestParseCoverageXml:
 # -----------------------------------------------------------------------
 
 
-class TestDashboardTemplate:
-    def test_template_has_no_raw_placeholders(self):
-        html = app_module.dashboard_template()
-        assert "__TREND_LIMIT__" not in html
-        assert "__WORST_LIMIT__" not in html
-        assert "__PIE_LIMIT__" not in html
-
-    def test_contains_limits_as_strings(self):
-        html = app_module.dashboard_template()
-        assert str(app_module.TREND_LIMIT) in html
-
-
 class TestDashboardHtmlFor:
     def test_hash_kind(self):
         html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
         assert "/api/alice/proj/h/abc123/trend" in html
         assert "/api/alice/proj/h/abc123/latest/uncovered-lines" in html
         assert "/download/" in html  # download links present
+        # Verify no raw Jinja2 placeholders remain
+        assert "{{" not in html
+        assert "}}" not in html
 
     def test_branch_kind(self):
         html = app_module.dashboard_html_for("b", "alice/proj", "main")
         assert "/api/alice/proj/b/main/trend" in html
         assert "/api/alice/proj/b/main/latest/uncovered-lines" in html
+
+    def test_contains_trend_limit(self):
+        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
+        assert str(app_module.TREND_LIMIT) in html
 
 
 # =====================================================================

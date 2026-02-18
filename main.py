@@ -17,12 +17,17 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from jinja2 import Environment, PackageLoader, select_autoescape
 from sqlalchemy.exc import IntegrityError
 
 from covsrv import db
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
-from covsrv.html import CHART_VIEW
 from covsrv.models import BranchEvent, Report
+
+_jinja_env = Environment(
+    loader=PackageLoader("covsrv", "templates"),
+    autoescape=select_autoescape(["html"]),
+)
 
 # ----------------------------
 # Configuration
@@ -382,38 +387,28 @@ async def ingest_report(
 # ----------------------------
 
 
-def dashboard_template() -> str:
-    return (
-        CHART_VIEW.replace("__TREND_LIMIT__", str(TREND_LIMIT))
-        .replace("__WORST_LIMIT__", str(DEFAULT_WORST_FILES))
-        .replace("__PIE_LIMIT__", str(DEFAULT_PIE_FILES))
-    )
-
-
 def dashboard_html_for(kind: str, repo_full: str, ref: str) -> str:
     owner, name = repo_full.split("/", 1)
 
     if kind == "h":
-        raw_url = f"/{owner}/{name}/h/"  # html templates will append the hash to this
+        raw_url = f"/{owner}/{name}/h/"
         trend_url = f"/api/{owner}/{name}/h/{ref}/trend"
-        worst_url = f"/api/{owner}/{name}/h/{ref}/latest/worst-files"
-        unc_url = f"/api/{owner}/{name}/h/{ref}/latest/uncovered-lines"
+        uncovered_url = f"/api/{owner}/{name}/h/{ref}/latest/uncovered-lines"
         download_suffix = f"/{owner}/{name}/h/{ref}"
     else:
         raw_url = f"/{owner}/{name}/h/"
         trend_url = f"/api/{owner}/{name}/b/{ref}/trend"
-        worst_url = f"/api/{owner}/{name}/b/{ref}/latest/worst-files"
-        unc_url = f"/api/{owner}/{name}/b/{ref}/latest/uncovered-lines"
+        uncovered_url = f"/api/{owner}/{name}/b/{ref}/latest/uncovered-lines"
         download_suffix = f"/{owner}/{name}/b/{ref}"
 
-    base = dashboard_template()
-
-    return (
-        base.replace("__RAW_URL__", raw_url)
-        .replace("__TREND_URL__", trend_url)
-        .replace("__WORST_URL__", worst_url)
-        .replace("__UNCOVERED_URL__", unc_url)
-        .replace("__DOWNLOAD_SUFFIX__", download_suffix)
+    template = _jinja_env.get_template("dashboard.html")
+    return template.render(
+        raw_url=raw_url,
+        trend_url=trend_url,
+        uncovered_url=uncovered_url,
+        download_suffix=download_suffix,
+        trend_limit=TREND_LIMIT,
+        pie_limit=DEFAULT_PIE_FILES,
     )
 
 
