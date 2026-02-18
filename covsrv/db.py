@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -14,7 +15,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from covsrv.models import Base, BranchEvent, BranchHead, Repo, Report
+from covsrv.models import BranchEvent, BranchHead, Repo, Report
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
 # Engine & session factory
@@ -47,13 +50,44 @@ async def session() -> AsyncIterator[AsyncSession]:
         await sess.commit()
 
 
+# ------------------------------------------------------------------
+# Alembic helpers
+# ------------------------------------------------------------------
+
+_ALEMBIC_DIR = str(Path(__file__).resolve().parent.parent / "alembic")
+
+
+def _run_alembic_upgrade(connection: Any) -> None:
+    """Synchronous helper executed inside ``run_sync``."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from alembic import command
+    from alembic.config import Config
+    from alembic.migration import MigrationContext
+
+    cfg = Config()
+    cfg.set_main_option("script_location", _ALEMBIC_DIR)
+    cfg.attributes["connection"] = connection
+
+    # Detect pre-existing databases (e.g. migrated from Atlas / create_all)
+    # that already have application tables but no alembic_version row yet.
+    ctx = MigrationContext.configure(connection)
+    if ctx.get_current_revision() is None:
+        existing = set(sa_inspect(connection).get_table_names())
+        if "reports" in existing:
+            command.stamp(cfg, "head")
+            return
+
+    command.upgrade(cfg, "head")
+
+
 async def init_db() -> None:
-    """Create tables / indexes if they don't exist."""
+    """Apply pending Alembic migrations to bring the database up to date."""
     if _engine is None:
         raise RuntimeError("Database not configured – call db.configure() first")
     async with _engine.begin() as conn:
         await conn.execute(text("PRAGMA journal_mode=WAL"))
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_run_alembic_upgrade)
 
 
 async def dispose() -> None:

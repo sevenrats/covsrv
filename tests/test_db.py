@@ -56,6 +56,15 @@ class TestInitDb:
         """Calling init_db twice should not raise."""
         await db.init_db()  # already called once by the fixture
 
+    async def test_creates_alembic_version_table(self, initialized_db):
+        """init_db should create the alembic_version tracking table."""
+        async with db.session() as sess:
+            result = await sess.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+            )
+            tables = {row[0] for row in result.all()}
+        assert "alembic_version" in tables
+
 
 # -----------------------------------------------------------------------
 # upsert_repo_seen
