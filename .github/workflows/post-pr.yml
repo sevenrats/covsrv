@@ -1,0 +1,99 @@
+name: Post-PR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest
+
+      - name: Generate coverage reports
+        run: |
+          set -eu
+
+          uv run coverage run -m pytest
+
+          COV_HTML_DIR=coverage_html
+          rm -rf "$COV_HTML_DIR"
+          mkdir -p "$COV_HTML_DIR"
+
+          echo "Generating HTML report..."
+          uv run coverage html -d "$COV_HTML_DIR"
+
+          echo "Generating Cobertura XML..."
+          uv run coverage xml -o "$COV_HTML_DIR/coverage.xml"
+
+          echo "Generating JSON report..."
+          uv run coverage json -o "$COV_HTML_DIR/coverage.json"
+
+          echo "Generating LCOV report..."
+          uv run coverage lcov -o "$COV_HTML_DIR/coverage.lcov"
+
+          # Sanity checks
+          [ -f "$COV_HTML_DIR/index.html" ]   || { echo "ERROR: HTML index.html was not generated." >&2; exit 1; }
+          [ -f "$COV_HTML_DIR/coverage.xml" ] || { echo "ERROR: coverage.xml was not generated." >&2; exit 1; }
+
+          echo "Creating tarball: coverage_html.tar.gz"
+          tar -C "$COV_HTML_DIR" -czf coverage_html.tar.gz .
+
+      - name: Publish coverage to covsrv
+        env:
+          REPORTS_ENDPOINT_URL: ${{ secrets.REPORTS_ENDPOINT_URL }}
+          COV_TOKEN: ${{ secrets.COV_TOKEN }}
+        run: |
+          set -eu
+
+          REPORTS_ENDPOINT_URL="${REPORTS_ENDPOINT_URL:-https://coverage.crandall.codes/reports}"
+          COV_TOKEN="${COV_TOKEN:-kvcc-coverage-token}"
+          SHA="${{ github.sha }}"
+          OWNER="${{ github.repository_owner }}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          BRANCH="${{ github.ref_name }}"
+
+          echo "== covsrv publish =="
+          echo "REPORTS_ENDPOINT_URL=$REPORTS_ENDPOINT_URL"
+          echo "OWNER=$OWNER"
+          echo "REPO=$REPO"
+          echo "BRANCH=$BRANCH"
+          echo "SHA=$SHA"
+
+          [ -n "$OWNER" ]  || { echo "ERROR: owner missing"; exit 1; }
+          [ -n "$REPO" ]   || { echo "ERROR: repo missing"; exit 1; }
+          [ -n "$SHA" ]    || { echo "ERROR: sha missing"; exit 1; }
+          [ -n "$BRANCH" ] || { echo "ERROR: branch missing"; exit 1; }
+
+          TARBALL="coverage_html.tar.gz"
+          [ -f "$TARBALL" ] || { echo "ERROR: tarball not found: $TARBALL" >&2; exit 1; }
+
+          echo "POSTing tarball to $REPORTS_ENDPOINT_URL ..."
+          curl -fsS \
+            -H "Authorization: Bearer $COV_TOKEN" \
+            -F "owner=$OWNER" \
+            -F "repo=$REPO" \
+            -F "branch=$BRANCH" \
+            -F "sha=$SHA" \
+            -F "tarball=@$TARBALL;type=application/gzip" \
+            "$REPORTS_ENDPOINT_URL"
+
+          echo
+          echo "Uploaded coverage artifact:"
+          echo "  repo:   $OWNER/$REPO"
+          echo "  branch: $BRANCH"
+          echo "  sha:    $SHA"
+          echo "  to:     $REPORTS_ENDPOINT_URL"
