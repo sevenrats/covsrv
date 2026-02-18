@@ -81,6 +81,7 @@ class TestUpsertRepoSeen:
                 "SELECT * FROM repos WHERE repo = ?;", ("alice/foo",)
             )
             row = await cur.fetchone()
+            assert row is not None
             assert row["first_seen_ts"] == 1000
             assert row["last_seen_ts"] == 2000
 
