@@ -206,6 +206,20 @@ async def reports_trend_for_repo_hash(
         return [dict(r._mapping) for r in result.all()]
 
 
+async def provider_url_for_repo(repo: str) -> str | None:
+    """Return the ``provider_url`` from the most recent report for *repo*."""
+    async with session() as sess:
+        stmt = (
+            select(Report.provider_url)
+            .where(Report.repo == repo)
+            .order_by(Report.received_ts.desc())
+            .limit(1)
+        )
+        result = await sess.execute(stmt)
+        row = result.first()
+        return None if row is None else str(row[0])
+
+
 async def report_percent_for_hashes(
     repo: str, hash_ts_pairs: list[tuple[str, int]]
 ) -> list[dict[str, Any]]:

@@ -11,16 +11,35 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote as _url_quote
 
 import anyio
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from fastapi import FastAPI, File, Form, Header, HTTPException, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from jinja2 import Environment, PackageLoader, select_autoescape
 from sqlalchemy.exc import IntegrityError
+from starlette.middleware.sessions import SessionMiddleware
 
 from covsrv import db
+from covsrv.auth import (
+    AuthenticationRequired,
+    auth_router,
+    load_auth_config,
+    require_view_permission,
+    setup_auth,
+)
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
 from covsrv.models import DEFAULT_PROVIDER_URL, BranchEvent, Report
 
@@ -207,6 +226,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     await init_dirs()
     db.configure(DB_PATH)
     await db.init_db()
+    await setup_auth()
     yield
 
 
@@ -284,6 +304,30 @@ app = FastAPI(
     version="7.0",
     lifespan=lifespan,
 )
+
+# Session middleware (required for OAuth flows)
+_auth_cfg = load_auth_config()
+app.add_middleware(
+    SessionMiddleware,  # type: ignore[arg-type]  # Starlette typing limitation
+    secret_key=_auth_cfg.session_secret,
+    same_site="lax",
+    https_only=_auth_cfg.public_app_url.startswith("https://"),
+)
+
+# Auth routes (/auth/{provider}/login, /auth/{provider}/callback, etc.)
+app.include_router(auth_router)
+
+
+@app.exception_handler(AuthenticationRequired)
+async def _auth_required_redirect(
+    request: Request, exc: AuthenticationRequired
+) -> RedirectResponse:
+    login_url = f"/auth/{exc.provider}/login?next={_url_quote(exc.next_url, safe='')}"
+    return RedirectResponse(url=login_url, status_code=307)
+
+
+# Convenience alias used as a route-level dependency on protected endpoints.
+_authn = [Depends(require_view_permission)]
 
 # ----------------------------
 # NEW: Single reports ingest endpoint
@@ -495,12 +539,14 @@ async def badge_branch_svg(
     return svg_response(svg, cache_control=cache, etag_seed=seed)
 
 
-@app.get("/{owner}/{name}/", response_class=HTMLResponse)
+@app.get("/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn)
 async def repo_home(owner: str, name: str) -> RedirectResponse:
     return RedirectResponse(url=f"/{owner}/{name}/b/main")
 
 
-@app.get("/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse)
+@app.get(
+    "/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse, dependencies=_authn
+)
 async def repo_branch_dashboard(owner: str, name: str, branch: str) -> str:
     repo_full = repo_from_owner_name(owner, name)
     provider_url = DEFAULT_PROVIDER_URL
@@ -522,12 +568,12 @@ def report_html_root_for_hash(repo_full: str, git_hash: str) -> Path:
     return REPORTS_DIR / repo_fs / "h" / git_hash / "html"
 
 
-@app.get("/raw/{owner}/{name}/h/{git_hash}")
+@app.get("/raw/{owner}/{name}/h/{git_hash}", dependencies=_authn)
 async def raw_hash_redirect(owner: str, name: str, git_hash: str) -> RedirectResponse:
     return RedirectResponse(url=f"/raw/{owner}/{name}/h/{git_hash}/", status_code=307)
 
 
-@app.get("/raw/{owner}/{name}/h/{git_hash}/")
+@app.get("/raw/{owner}/{name}/h/{git_hash}/", dependencies=_authn)
 async def raw_hash_index(owner: str, name: str, git_hash: str) -> FileResponse:
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(repo_full, git_hash)
@@ -537,7 +583,7 @@ async def raw_hash_index(owner: str, name: str, git_hash: str) -> FileResponse:
     return FileResponse(path=str(index))
 
 
-@app.get("/raw/{owner}/{name}/h/{git_hash}/{path:path}")
+@app.get("/raw/{owner}/{name}/h/{git_hash}/{path:path}", dependencies=_authn)
 async def raw_hash_file(
     owner: str, name: str, git_hash: str, path: str
 ) -> FileResponse:
@@ -575,7 +621,9 @@ def framed_html_for(
     )
 
 
-@app.get("/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse)
+@app.get(
+    "/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse, dependencies=_authn
+)
 async def repo_hash_framed(owner: str, name: str, git_hash: str) -> str:
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(repo_full, git_hash)
@@ -585,7 +633,11 @@ async def repo_hash_framed(owner: str, name: str, git_hash: str) -> str:
     return framed_html_for(repo_full, git_hash, provider_url=provider_url)
 
 
-@app.get("/{owner}/{name}/h/{git_hash}/chart", response_class=HTMLResponse)
+@app.get(
+    "/{owner}/{name}/h/{git_hash}/chart",
+    response_class=HTMLResponse,
+    dependencies=_authn,
+)
 async def repo_hash_chart(owner: str, name: str, git_hash: str) -> str:
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(repo_full, git_hash)
@@ -640,7 +692,7 @@ async def resolve_download_token(root: Path, token: str) -> tuple[str, Path]:
     return "file", p
 
 
-@app.get("/download/{token}/{owner}/{name}/h/{git_hash}")
+@app.get("/download/{token}/{owner}/{name}/h/{git_hash}", dependencies=_authn)
 async def hash_download_token(owner: str, name: str, git_hash: str, token: str):
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(repo_full, git_hash)
@@ -670,7 +722,7 @@ async def hash_download_token(owner: str, name: str, git_hash: str, token: str):
     )
 
 
-@app.get("/download/{token}/{owner}/{name}/b/{branch:path}")
+@app.get("/download/{token}/{owner}/{name}/b/{branch:path}", dependencies=_authn)
 async def branch_download_token(owner: str, name: str, branch: str, token: str):
     repo_full = repo_from_owner_name(owner, name)
     root = await report_html_root_for_branch(repo_full, branch)
@@ -705,7 +757,7 @@ async def branch_download_token(owner: str, name: str, branch: str, token: str):
 # ----------------------------
 
 
-@app.get("/api/{owner}/{name}/h/{git_hash}/trend")
+@app.get("/api/{owner}/{name}/h/{git_hash}/trend", dependencies=_authn)
 async def api_repo_hash_trend(
     owner: str, name: str, git_hash: str, limit: int = TREND_LIMIT
 ) -> JSONResponse:
@@ -724,7 +776,7 @@ async def latest_stats_from_xml(report_dir: Path) -> tuple[float, list[XmlFileSt
     return await asyncio.to_thread(parse_coverage_xml, xml_path)
 
 
-@app.get("/api/{owner}/{name}/h/{git_hash}/latest/worst-files")
+@app.get("/api/{owner}/{name}/h/{git_hash}/latest/worst-files", dependencies=_authn)
 async def api_repo_hash_latest_worst_files(
     owner: str, name: str, git_hash: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
@@ -754,7 +806,7 @@ async def api_repo_hash_latest_worst_files(
     )
 
 
-@app.get("/api/{owner}/{name}/h/{git_hash}/latest/uncovered-lines")
+@app.get("/api/{owner}/{name}/h/{git_hash}/latest/uncovered-lines", dependencies=_authn)
 async def api_repo_hash_latest_uncovered_lines(
     owner: str, name: str, git_hash: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
@@ -789,7 +841,7 @@ async def api_repo_hash_latest_uncovered_lines(
 # ----------------------------
 
 
-@app.get("/api/{owner}/{name}/b/{branch:path}/trend")
+@app.get("/api/{owner}/{name}/b/{branch:path}/trend", dependencies=_authn)
 async def api_repo_branch_trend(
     owner: str, name: str, branch: str, limit: int = TREND_LIMIT
 ) -> JSONResponse:
@@ -805,7 +857,7 @@ async def api_repo_branch_trend(
     )
 
 
-@app.get("/api/{owner}/{name}/b/{branch:path}/latest/worst-files")
+@app.get("/api/{owner}/{name}/b/{branch:path}/latest/worst-files", dependencies=_authn)
 async def api_repo_branch_latest_worst_files(
     owner: str, name: str, branch: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
@@ -839,7 +891,9 @@ async def api_repo_branch_latest_worst_files(
     )
 
 
-@app.get("/api/{owner}/{name}/b/{branch:path}/latest/uncovered-lines")
+@app.get(
+    "/api/{owner}/{name}/b/{branch:path}/latest/uncovered-lines", dependencies=_authn
+)
 async def api_repo_branch_latest_uncovered_lines(
     owner: str, name: str, branch: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
