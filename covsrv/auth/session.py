@@ -62,8 +62,24 @@ def clear_provider_session(request: SessionRequest, provider: str) -> None:
     """Remove session data for a single provider."""
     providers = request.session.get("providers", {})
     providers.pop(provider, None)
+    # Re-assign so Starlette's SessionMiddleware marks the session as
+    # modified and writes the updated cookie back to the client.
+    request.session["providers"] = providers
 
 
 def clear_all_sessions(request: SessionRequest) -> None:
     """Remove all provider sessions."""
     request.session.pop("providers", None)
+    # Belt-and-suspenders: ensure the session is marked dirty even when
+    # "providers" was already absent.
+    request.session["providers"] = {}
+
+
+def get_logged_in_providers(request: SessionRequest) -> list[dict[str, str]]:
+    """Return a list of ``{"provider": ..., "username": ...}`` for every active session."""
+    providers = request.session.get("providers", {})
+    result: list[dict[str, str]] = []
+    for name, data in providers.items():
+        if data and data.get("access_token"):
+            result.append({"provider": name, "username": data.get("username", name)})
+    return result

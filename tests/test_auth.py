@@ -19,6 +19,7 @@ from covsrv.auth.config import AuthConfig, ProviderConfig, load_auth_config
 from covsrv.auth.provider import (
     OAuthProvider,
     ProviderUser,
+    RepoAccess,
     ResourceDescriptor,
     TokenResponse,
 )
@@ -235,13 +236,13 @@ class TestOAuthProviderCanView:
                 return ProviderUser(id="1", username="u", provider="stub")
 
             async def can_view_repo(self, access_token, owner, repo):
-                return owner == "allowed"
+                return RepoAccess.ALLOWED if owner == "allowed" else RepoAccess.DENIED
 
         p = StubProvider()
         rd_yes = ResourceDescriptor(provider="stub", owner="allowed", repo="r")
         rd_no = ResourceDescriptor(provider="stub", owner="denied", repo="r")
-        assert await p.can_view("tok", rd_yes) is True
-        assert await p.can_view("tok", rd_no) is False
+        assert await p.can_view("tok", rd_yes) is RepoAccess.ALLOWED
+        assert await p.can_view("tok", rd_no) is RepoAccess.DENIED
 
 
 # =====================================================================
@@ -267,8 +268,14 @@ class _FakeProvider(OAuthProvider):
     async def get_user(self, access_token: str) -> ProviderUser:
         return ProviderUser(id="42", username="fakeuser", provider="fakeprov")
 
-    async def can_view_repo(self, access_token: str, owner: str, repo: str) -> bool:
-        return repo != "private-repo"
+    async def can_view_repo(
+        self, access_token: str, owner: str, repo: str
+    ) -> RepoAccess:
+        if repo == "expired-repo":
+            return RepoAccess.TOKEN_EXPIRED
+        if repo == "private-repo":
+            return RepoAccess.DENIED
+        return RepoAccess.ALLOWED
 
     async def is_repo_public(self, owner: str, repo: str) -> bool:
         return repo == "public-repo"
@@ -547,10 +554,10 @@ class TestRequireViewPermission:
         )
         assert resp.status_code == 200
 
-    async def test_authenticated_denied_repo_returns_404(
+    async def test_authenticated_denied_repo_returns_403(
         self, auth_client: AsyncClient
     ):
-        """Accessing a repo the provider denies returns 404."""
+        """Accessing a repo the provider denies returns a 403 access-denied page."""
         # Seed so the provider lookup maps this repo to fakeprov
         import main as app_module
         from tests.test_main import seed_report
@@ -588,7 +595,93 @@ class TestRequireViewPermission:
             cookies=session_cookies,
             follow_redirects=False,
         )
+        assert resp.status_code == 403
+        assert "Access Denied" in resp.text
+        assert "alice/private-repo" in resp.text
+
+    async def test_authenticated_denied_api_returns_404(self, auth_client: AsyncClient):
+        """API/JSON request for a denied repo still gets a 404 (no leak)."""
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/private-repo",
+            provider_url="https://fake.example.com",
+        )
+
+        # Login first
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        import re
+
+        loc = login_resp.headers["location"]
+        m = re.search(r"state=([^&]+)", loc)
+        assert m is not None
+        state = m.group(1)
+
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={state}",
+            follow_redirects=False,
+            cookies=cookies,
+        )
+        session_cookies = cb_resp.cookies
+
+        # API request for denied repo → 404
+        resp = await auth_client.get(
+            "/api/alice/private-repo/b/main/trend",
+            cookies=session_cookies,
+            follow_redirects=False,
+            headers={"Accept": "application/json"},
+        )
         assert resp.status_code == 404
+
+    async def test_expired_token_redirects_to_login(self, auth_client: AsyncClient):
+        """When the provider reports token expired, user is sent back to OAuth."""
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        # "expired-repo" triggers TOKEN_EXPIRED in _FakeProvider
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/expired-repo",
+            provider_url="https://fake.example.com",
+        )
+
+        # Login first
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        import re
+
+        loc = login_resp.headers["location"]
+        m = re.search(r"state=([^&]+)", loc)
+        assert m is not None
+        state = m.group(1)
+
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={state}",
+            follow_redirects=False,
+            cookies=cookies,
+        )
+        session_cookies = cb_resp.cookies
+
+        # Access repo whose token is "expired" → should redirect to login
+        resp = await auth_client.get(
+            "/alice/expired-repo/b/main",
+            cookies=session_cookies,
+            follow_redirects=False,
+        )
+        assert resp.status_code == 307
+        loc = resp.headers["location"]
+        assert "/auth/fakeprov/login" in loc
 
 
 class TestAuthDisabledPassthrough:

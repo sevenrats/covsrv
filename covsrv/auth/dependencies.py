@@ -7,8 +7,8 @@ import logging
 import httpx
 from fastapi import HTTPException, Request
 
-from covsrv.auth.provider import ProviderUser
-from covsrv.auth.session import get_provider_session
+from covsrv.auth.provider import ProviderUser, RepoAccess
+from covsrv.auth.session import clear_provider_session, get_provider_session
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,18 @@ class AuthenticationRequired(Exception):
     def __init__(self, provider: str, next_url: str) -> None:
         self.provider = provider
         self.next_url = next_url
+
+
+class AccessDenied(Exception):
+    """Raised when an authenticated user does not have access to a repo.
+
+    Caught by an exception handler that renders a user-friendly
+    "Access Denied" splash page for browser requests.
+    """
+
+    def __init__(self, owner: str, name: str) -> None:
+        self.owner = owner
+        self.name = name
 
 
 # ------------------------------------------------------------------
@@ -111,11 +123,12 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
     if cached is True:
         return ProviderUser(id=user_id, username=username, provider=provider_name)  # type: ignore[arg-type]
     if cached is False:
-        raise HTTPException(status_code=404, detail="Not found")
+        _handle_access_denied(request, owner, name)
+        raise AssertionError  # pragma: no cover
 
     # --- call provider API ---
     try:
-        allowed = await provider.can_view_repo(access_token, owner, name)
+        result = await provider.can_view_repo(access_token, owner, name)
     except Exception:
         logger.exception("Provider API error during authz check for %s/%s", owner, name)
         raise HTTPException(
@@ -123,10 +136,23 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
             detail="Authorization check temporarily unavailable",
         )
 
+    if result is RepoAccess.TOKEN_EXPIRED:
+        # Token revoked or expired — clear session + user cache, re-authenticate.
+        # We must NOT cache a denial here: after re-login the user_id is the
+        # same, and a stale ``False`` would block access even with a fresh
+        # valid token.  Clearing the user's cache entries ensures a fresh
+        # provider check after re-authentication.
+        clear_provider_session(request, provider_name)  # type: ignore[arg-type]
+        auth_state.cache.clear_user(provider_name, user_id)  # type: ignore[arg-type]
+        _handle_unauthenticated(request, provider_name)  # type: ignore[arg-type]
+        raise AssertionError  # pragma: no cover
+
+    allowed = result is RepoAccess.ALLOWED
     auth_state.cache.set(provider_name, user_id, owner, name, allowed)  # type: ignore[arg-type]
 
     if not allowed:
-        raise HTTPException(status_code=404, detail="Not found")
+        _handle_access_denied(request, owner, name)
+        raise AssertionError  # pragma: no cover
 
     return ProviderUser(id=user_id, username=username, provider=provider_name)  # type: ignore[arg-type]
 
@@ -219,3 +245,19 @@ def _handle_unauthenticated(request: Request, provider_name: str) -> None:
         )
 
     raise AuthenticationRequired(provider_name, next_url)
+
+
+def _handle_access_denied(request: Request, owner: str, name: str) -> None:
+    """Raise the appropriate error for an authenticated but unauthorised caller.
+
+    * API / JSON callers → 404 (don't leak repo existence)
+    * Browser callers    → ``AccessDenied`` (caught by the exception
+      handler and turned into a user-friendly splash page)
+    """
+    accept = request.headers.get("accept", "")
+    path = str(request.url.path)
+
+    if "application/json" in accept or path.startswith("/api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    raise AccessDenied(owner, name)

@@ -8,7 +8,12 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
-from covsrv.auth.session import clear_all_sessions, clear_provider_session
+from covsrv.auth.session import (
+    clear_all_sessions,
+    clear_provider_session,
+    get_logged_in_providers,
+    get_provider_session,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -134,6 +139,11 @@ async def auth_logout(
 ) -> RedirectResponse:
     from covsrv.auth import auth_state
 
+    # Evict authz cache entries for this user before clearing the session
+    session_data = get_provider_session(request, provider)
+    if session_data:
+        auth_state.cache.clear_user(provider, session_data["user_id"])
+
     clear_provider_session(request, provider)
     safe = _safe_next_url(next, (auth_state.config or _EMPTY_CONFIG).public_app_url)
     return RedirectResponse(url=safe, status_code=307)
@@ -145,6 +155,12 @@ async def auth_logout_all(
     next: str = "/",
 ) -> RedirectResponse:
     from covsrv.auth import auth_state
+
+    # Evict authz cache entries for every logged-in provider
+    for entry in get_logged_in_providers(request):
+        session_data = get_provider_session(request, entry["provider"])
+        if session_data:
+            auth_state.cache.clear_user(entry["provider"], session_data["user_id"])
 
     clear_all_sessions(request)
     safe = _safe_next_url(next, (auth_state.config or _EMPTY_CONFIG).public_app_url)
