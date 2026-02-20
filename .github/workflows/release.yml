@@ -48,16 +48,6 @@ jobs:
   docker:
     needs: test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            suffix: ""
-            extra_tags: "type=raw,value=amd64"
-          - platform: linux/arm64
-            suffix: "-arm64"
-            extra_tags: "type=raw,value=arm64"
     steps:
       - uses: actions/checkout@v4
 
@@ -66,21 +56,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
-          flavor: |
-            suffix=${{ matrix.suffix }}
           tags: |
-            # version tag from git tag  (v1.2.3 → 1.2.3 / 1.2.3-arm64)
             type=semver,pattern={{version}}
-            # major.minor  (v1.2.3 → 1.2 / 1.2-arm64)
             type=semver,pattern={{major}}.{{minor}}
-            # short sha
             type=sha,prefix=sha-,format=short
-            # latest
             type=raw,value=latest
-            ${{ matrix.extra_tags }}
 
       - name: Set up QEMU
-        if: matrix.platform == 'linux/arm64'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -99,7 +81,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
