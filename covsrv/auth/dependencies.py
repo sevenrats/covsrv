@@ -108,6 +108,15 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
     if provider is None:
         raise HTTPException(status_code=404, detail="Not found")
 
+    # Provider exists but has no OAuth credentials → can check visibility
+    # but cannot authenticate users.  Deny access to private repos.
+    if (
+        auth_state.config is not None
+        and provider_name not in auth_state.config.providers
+    ):
+        _handle_access_denied(request, owner, name)
+        raise AssertionError  # pragma: no cover
+
     # --- require login ---
     session_data = get_provider_session(request, provider_name)  # type: ignore[arg-type]
     if session_data is None:
