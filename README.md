@@ -1,131 +1,163 @@
 [![Coverage](https://coverage.crandall.codes/badge/sevenrats/covsrv/b/main)](https://coverage.crandall.codes/sevenrats/covsrv/b/main)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow?logo=buymeacoffee)](https://buymeacoffee.com/sevenrats)
 
 # covsrv
 
-A lightweight, self-hosted **code-coverage server** and dashboard. Ingest
-[Cobertura XML](https://cobertura.github.io/cobertura/) reports from any CI
-pipeline, browse interactive HTML coverage reports, track trends per branch,
-and embed live SVG badges in your READMEs — all without sending your data to a
-third-party service.
+A self-hosted code-coverage server and dashboard built with
+[FastAPI](https://fastapi.tiangolo.com/). Upload a `.tar.gz` of coverage
+artifacts from CI, then browse HTML reports, track per-branch trends, and
+embed SVG badges — without sending data to a third party.
 
 ## Features
 
-- **Single-endpoint report ingestion** — push a `.tar.gz` containing your HTML
-  report and `coverage.xml` from any CI system.
-- **SVG coverage badges** — shields.io-style badges for any branch or commit,
-  perfect for README files.
-- **Interactive dashboards** — per-branch and per-commit HTML views with
-  coverage trend charts, worst-file lists, and uncovered-line breakdowns.
-- **Raw report hosting** — serves the original HTML report (e.g. `coverage html`)
-  directly, framed inside a lightweight navigation shell.
+- **Single-endpoint report ingestion** — `POST /reports` accepts a `.tar.gz`
+  containing an HTML coverage report, `coverage.xml` (Cobertura format), and
+  optionally `coverage.json` and `coverage.lcov`. See
+  [`.github/workflows/post-pr.yml`](.github/workflows/post-pr.yml) for a
+  working example.
+- **SVG coverage badges** — shields.io-style badges for any branch or commit.
+- **Dashboards** — per-branch and per-commit HTML views with coverage trend
+  charts and uncovered-line breakdowns.
+- **Raw report hosting** — serves the uploaded HTML report directly, framed
+  inside a navigation shell.
 - **Downloadable artifacts** — download `coverage.xml`, `coverage.json`, or
-  `coverage.lcov` for any commit or branch head.
-- **OAuth access control** — optional GitHub and Gitea/Forgejo OAuth so private
-  repo coverage is only visible to collaborators.
-- **SQLite + Alembic** — zero-dependency database with automatic migrations.
-- **Docker-first deployment** — single container, single volume, ready to run.
+  `coverage.lcov` for any commit or branch head (if those files were included
+  in the uploaded tarball).
+- **OAuth access control** — optional GitHub and Gitea/Forgejo OAuth so
+  private-repo coverage is only visible to collaborators.
+- **TOML configuration** — a single `config.toml` file defines providers,
+  hierarchical report keys, and auth settings. Environment variables are
+  supported as a legacy fallback when no config file is present.
+- **SQLite + Alembic** — Alembic migrations run automatically on startup
+  via `db.init_db()`.
 
 ---
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [Badge Usage](#badge-usage)
+- [Configuration](#configuration)
 - [Report Ingestion](#report-ingestion)
+- [Badges](#badges)
 - [Dashboards & API](#dashboards--api)
 - [Authentication & OAuth](#authentication--oauth)
-- [Configuration Reference](#configuration-reference)
-- [Deployment](#deployment)
+- [Data & Backups](#data--backups)
 - [Development](#development)
-- [Roadmap](#roadmap)
-- [License](#license)
 
 ---
 
 ## Quick Start
 
-### Docker Compose (recommended)
+### Docker Compose
+
+The repository includes a [`compose.yml`](compose.yml):
 
 ```yaml
-# compose.yml
+volumes:
+  covsrv_conf: {}
+  covsrv_data: {}
+
 services:
   covsrv:
     image: ghcr.io/sevenrats/covsrv:latest
     ports:
       - "8000:8000"
     environment:
+      COVSRV_CONF: /conf
       COVSRV_DATA: /data
     volumes:
+      - covsrv_conf:/conf
       - covsrv_data:/data
     restart: unless-stopped
-
-volumes:
-  covsrv_data:
 ```
 
 ```bash
 docker compose up -d
 ```
 
-The server is now available at **http://localhost:8000**. The interactive API
-docs live at `/docs`.
+On first start, copy [`config.example.toml`](config.example.toml) into the
+`covsrv_conf` volume as `config.toml` and edit it (see
+[Configuration](#configuration)).
 
-### Run locally (development)
+The server listens on port **8000**. The root path (`/`) redirects to the
+FastAPI interactive docs at `/docs`.
+
+### Run locally
 
 ```bash
 # Requires Python ≥ 3.13 and uv
 uv sync
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+cp config.example.toml config.toml   # edit as needed
+uvicorn main:app --reload
 ```
 
 ---
 
-## Badge Usage
+## Configuration
 
-Embed a live coverage badge in your README or wiki. The SVG is generated
-server-side using shields.io-style colours:
+covsrv is configured through a TOML file. The path is resolved from the
+`COVSRV_CONF` environment variable, which may point to a file or a directory
+(in which case `config.toml` is expected inside it). When no `COVSRV_CONF` is
+set, covsrv looks for `config.toml` under `$COVSRV_DATA` (default: the
+working directory).
 
-| Coverage | Colour |
-|----------|--------|
-| ≥ 90 %   | ![green](https://img.shields.io/badge/coverage-90%25-brightgreen) |
-| 75 – 89 % | ![yellow](https://img.shields.io/badge/coverage-80%25-yellow) |
-| 50 – 74 % | ![orange](https://img.shields.io/badge/coverage-60%25-orange) |
-| < 50 %   | ![red](https://img.shields.io/badge/coverage-30%25-red) |
+See [`config.example.toml`](config.example.toml) for a fully commented
+example. The key sections are:
 
-### Branch badge (tracks the branch head — updates on every push)
+### `[global]`
 
-```
-https://YOUR_HOST/badge/{owner}/{repo}/b/{branch}
-```
+| Key | Default | Description |
+|-----|---------|-------------|
+| `report_key` | — | Master report key; authorises posting for any repo on any provider |
+| `public_url` | `http://localhost:8000` | Externally-reachable base URL (used for OAuth callbacks) |
+| `session_secret` | `change-me-in-production` | Secret for signing session cookies |
+| `auth_enabled` | `false` | Set to `true` to require OAuth for private repos |
+| `auth_cache_ttl` | `60` | Seconds to cache authorization decisions |
 
-**Markdown example:**
+### `[providers.<name>]`
 
-```markdown
-[![Coverage](https://coverage.example.com/badge/myorg/myrepo/b/main)](https://coverage.example.com/myorg/myrepo/b/main)
-```
+Each provider block defines a code-forge backend. You can define multiple
+providers (e.g. GitHub and a self-hosted Gitea), each with a unique name.
 
-### Commit badge (immutable — permanently cached)
+| Key | Required | Description |
+|-----|----------|-------------|
+| `type` | Yes | `"github"` or `"gitea"` |
+| `url` | Yes | Forge base URL (e.g. `https://github.com`) |
+| `report_key` | — | Provider-level report key |
+| `client_id` | — | OAuth client ID (needed only when `auth_enabled = true`) |
+| `client_secret` | — | OAuth client secret |
 
-```
-https://YOUR_HOST/badge/{owner}/{repo}/h/{sha}
-```
-
-### Query parameters
-
-| Param | Default | Description |
-|-------|---------|-------------|
-| `label` | `coverage` | Left-hand text on the badge |
-| `decimals` | `1` | Decimal places shown (0–3) |
-
-**Example with custom label:**
+Report keys are hierarchical. A key at a broader scope authorises everything
+within that scope:
 
 ```
-https://coverage.example.com/badge/myorg/myrepo/b/main?label=cov&decimals=2
+global  →  provider  →  owner  →  repo
 ```
 
-> **Tip:** Branch badges use `Cache-Control: max-age=60` so CDNs and browsers
-> pick up changes quickly. Commit badges are cached immutably
-> (`max-age=31536000, immutable`).
+Owner-level and repo-level keys are defined as nested tables:
+
+```toml
+[providers.my-gitea.owners.sevenrats]
+report_key = "owner-level-key"
+
+[providers.my-gitea.repos."sevenrats/covsrv"]
+report_key = "repo-level-key"
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COVSRV_DATA` | `.` | Base directory. `covsrv_data/` inside it holds the SQLite DB and uploaded reports. |
+| `COVSRV_CONF` | — | Path to `config.toml` or a directory containing it |
+
+When **no** config file is present, covsrv falls back to environment variables
+for auth settings (`COVSRV_AUTH_ENABLED`, `COVSRV_SESSION_SECRET`,
+`COVSRV_PUBLIC_URL`, `COVSRV_AUTH_CACHE_TTL`, `COVSRV_GITHUB_CLIENT_ID`,
+`COVSRV_GITHUB_CLIENT_SECRET`, `COVSRV_GITEA_URL`, `COVSRV_GITEA_CLIENT_ID`,
+`COVSRV_GITEA_CLIENT_SECRET`) and a single argon2-hashed token for report
+ingestion. This mode exists for backward compatibility; the TOML config file
+is the preferred approach.
 
 ---
 
@@ -133,67 +165,42 @@ https://coverage.example.com/badge/myorg/myrepo/b/main?label=cov&decimals=2
 
 ### `POST /reports`
 
-Upload a `.tar.gz` archive containing your HTML coverage report **with a
-`coverage.xml` (Cobertura format) at the top level** of the HTML directory.
+Upload a `.tar.gz` archive containing your coverage artifacts. The tarball
+must include `coverage.xml` (Cobertura format) at the top level. It typically
+also contains the HTML report (`index.html` and supporting files) and may
+include `coverage.json` and `coverage.lcov`.
+
+For a complete working example — generating all artifacts, packaging the
+tarball, and posting it — see
+[`.github/workflows/post-pr.yml`](.github/workflows/post-pr.yml).
 
 #### Form fields
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `owner` | ✅ | — | Repository owner / org (e.g. `myorg`) |
-| `repo` | ✅ | — | Repository name (e.g. `myrepo`) |
-| `branch` | ✅ | — | Branch name (e.g. `main`) |
-| `sha` | ✅ | — | Full or abbreviated commit SHA (≥ 7 chars) |
-| `provider_url` | — | `https://github.com` | Git forge base URL |
-| `tarball` | ✅ | — | `.tar.gz` file upload |
+| `owner` | Yes | — | Repository owner / org |
+| `repo` | Yes | — | Repository name |
+| `branch` | Yes | — | Branch name |
+| `sha` | Yes | — | Commit SHA (≥ 7 characters) |
+| `provider` | Yes (with config file) | `""` | Provider name as defined in `config.toml` |
+| `provider_url` | — | `https://github.com` | Forge base URL (legacy; ignored when a config file is loaded) |
+| `tarball` | Yes | — | `.tar.gz` file upload |
 
 #### Authentication
 
-Every ingest request must include a bearer token:
+Every request must include a report key via one of:
 
 ```
-Authorization: Bearer <TOKEN>
+Authorization: Bearer <REPORT_KEY>
 ```
 
-or alternatively:
-
 ```
-X-Access-Token: <TOKEN>
+X-Access-Token: <REPORT_KEY>
 ```
 
-#### curl example
-
-```bash
-# 1. Generate HTML + coverage.xml
-pytest --cov --cov-report=html --cov-report=xml
-
-# 2. Package into a tarball
-tar czf coverage.tar.gz -C htmlcov .
-
-# 3. Upload
-curl -X POST https://coverage.example.com/reports \
-  -H "Authorization: Bearer $COVSRV_TOKEN" \
-  -F owner=myorg \
-  -F repo=myrepo \
-  -F branch=main \
-  -F sha=$(git rev-parse HEAD) \
-  -F tarball=@coverage.tar.gz
-```
-
-#### GitHub Actions example
-
-```yaml
-- name: Upload coverage to covsrv
-  run: |
-    tar czf coverage.tar.gz -C htmlcov .
-    curl -X POST ${{ secrets.COVSRV_URL }}/reports \
-      -H "Authorization: Bearer ${{ secrets.COVSRV_TOKEN }}" \
-      -F owner=${{ github.repository_owner }} \
-      -F repo=${{ github.event.repository.name }} \
-      -F branch=${{ github.ref_name }} \
-      -F sha=${{ github.sha }} \
-      -F tarball=@coverage.tar.gz
-```
+The key is verified against the hierarchical keys in `config.toml`
+(repo → owner → provider → global). Without a config file, the legacy
+argon2-hashed token is used instead.
 
 #### Response
 
@@ -213,8 +220,53 @@ curl -X POST https://coverage.example.com/reports \
 }
 ```
 
-> Reports are **immutable per commit SHA** — a second upload for the same
-> `(repo, sha)` pair returns `409 Conflict`.
+Reports are immutable per commit SHA. A second upload for the same
+`(repo, sha)` pair returns `409 Conflict`.
+
+---
+
+## Badges
+
+SVG coverage badges are always publicly accessible, even when auth is enabled.
+
+### Branch badge (tracks the branch head)
+
+```
+/badge/{owner}/{repo}/b/{branch}
+```
+
+Cached with `Cache-Control: max-age=60`.
+
+### Commit badge (immutable)
+
+```
+/badge/{owner}/{repo}/h/{sha}
+```
+
+Cached with `Cache-Control: max-age=31536000, immutable`.
+
+### Query parameters
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `label` | `coverage` | Left-hand text on the badge |
+| `decimals` | `1` | Decimal places shown (0–3) |
+
+### Colour thresholds
+
+| Coverage | Colour |
+|----------|--------|
+| ≥ 90% | green |
+| 75–89% | yellow |
+| 50–74% | orange |
+| < 50% | red |
+| unknown | grey |
+
+### Markdown example
+
+```markdown
+[![Coverage](https://coverage.example.com/badge/myorg/myrepo/b/main)](https://coverage.example.com/myorg/myrepo/b/main)
+```
 
 ---
 
@@ -225,7 +277,7 @@ curl -X POST https://coverage.example.com/reports \
 | URL pattern | Description |
 |-------------|-------------|
 | `/{owner}/{repo}/` | Redirects to the `main` branch dashboard |
-| `/{owner}/{repo}/b/{branch}` | Branch dashboard — trend chart, worst files, uncovered lines |
+| `/{owner}/{repo}/b/{branch}` | Branch dashboard — trend chart, uncovered lines |
 | `/{owner}/{repo}/h/{sha}` | Commit view — framed raw HTML report |
 | `/{owner}/{repo}/h/{sha}/chart` | Commit chart dashboard |
 | `/raw/{owner}/{repo}/h/{sha}/` | Raw HTML report (served as-is from disk) |
@@ -243,80 +295,49 @@ curl -X POST https://coverage.example.com/reports \
 
 ### Downloads
 
+These return the raw artifact files from the uploaded tarball, if present.
+
 | URL pattern | Description |
 |-------------|-------------|
-| `/download/xml/{owner}/{repo}/h/{sha}` | Download `coverage.xml` for a commit |
-| `/download/json/{owner}/{repo}/h/{sha}` | Download `coverage.json` for a commit |
-| `/download/lcov/{owner}/{repo}/h/{sha}` | Download `coverage.lcov` for a commit |
-| `/download/{token}/{owner}/{repo}/b/{branch}` | Same, but resolved to the branch head |
+| `/download/xml/{owner}/{repo}/h/{sha}` | `coverage.xml` |
+| `/download/json/{owner}/{repo}/h/{sha}` | `coverage.json` |
+| `/download/lcov/{owner}/{repo}/h/{sha}` | `coverage.lcov` |
+| `/download/{token}/{owner}/{repo}/b/{branch}` | Same, resolved to the branch head |
 
 ---
 
 ## Authentication & OAuth
 
-**Auth is disabled by default.** All dashboards, badges, and APIs are publicly
-accessible. To protect private-repo coverage data, enable OAuth.
+Auth is disabled by default. Enable it by setting `auth_enabled = true` in
+`config.toml` and configuring OAuth credentials for at least one provider.
 
 ### How it works
 
-1. Set `COVSRV_AUTH_ENABLED=true` and configure at least one OAuth provider.
-2. When a user visits a dashboard for a **public** repo, access is granted
-   without login (verified via an anonymous API call to the forge).
-3. When a user visits a dashboard for a **private** repo:
-   - **Browser** → redirected to the provider's OAuth login.
-   - **API / JSON** → receives `401 Unauthorized`.
-4. After login, covsrv checks whether the user can view the repo via the
-   provider's API. The result is cached for `COVSRV_AUTH_CACHE_TTL` seconds.
-5. If the user cannot access the repo, they receive `404 Not Found` (to avoid
-   leaking the repo's existence).
+1. Dashboards for **public** repos are accessible without login (verified via
+   an anonymous API call to the forge).
+2. Dashboards for **private** repos redirect browser requests to the
+   provider's OAuth login. API/JSON requests receive `401 Unauthorized`.
+3. After login, covsrv checks repo access via the provider's API. The result
+   is cached for `auth_cache_ttl` seconds.
+4. Users without access receive `403 Forbidden`.
 
-### Supported providers
+### OAuth callback URLs
 
-#### GitHub
+When creating an OAuth application on your forge, set the callback URL to:
 
-```env
-COVSRV_AUTH_ENABLED=true
-COVSRV_SESSION_SECRET=<random-secret>
-COVSRV_PUBLIC_URL=https://coverage.example.com
-
-COVSRV_GITHUB_CLIENT_ID=<your-github-oauth-app-client-id>
-COVSRV_GITHUB_CLIENT_SECRET=<your-github-oauth-app-client-secret>
+```
+{public_url}/auth/{provider_name}/callback
 ```
 
-Create a GitHub OAuth App at
-**Settings → Developer settings → OAuth Apps** with the callback URL:
+For example, if `public_url = "https://coverage.example.com"` and the provider
+is named `github` in your config:
 
 ```
 https://coverage.example.com/auth/github/callback
 ```
 
-Requested scopes: `read:org`, `repo` (allows checking private repo access).
-
-#### Gitea / Forgejo
-
-```env
-COVSRV_AUTH_ENABLED=true
-COVSRV_SESSION_SECRET=<random-secret>
-COVSRV_PUBLIC_URL=https://coverage.example.com
-
-COVSRV_GITEA_URL=https://gitea.example.com
-COVSRV_GITEA_CLIENT_ID=<your-gitea-oauth-app-client-id>
-COVSRV_GITEA_CLIENT_SECRET=<your-gitea-oauth-app-client-secret>
-```
-
-Create an OAuth2 application in your Gitea/Forgejo instance at
-**Site Administration → Applications** (or user-level settings) with the
-callback URL:
-
-```
-https://coverage.example.com/auth/gitea/callback
-```
-
-### Multi-provider
-
-Both GitHub and Gitea can be enabled simultaneously. covsrv maps each
-repository to the correct provider based on the `provider_url` stored at
-ingest time.
+GitHub OAuth Apps request scopes `read:org` and `repo`. Gitea/Forgejo apps
+request `openid`, `profile`, and `email`.
 
 ### Auth routes
 
@@ -327,122 +348,21 @@ ingest time.
 | `/auth/{provider}/logout` | Log out of a single provider |
 | `/auth/logout` | Log out of all providers |
 
-> **Note:** Badge endpoints (`/badge/...`) are **always public** and do not
-> require authentication, regardless of auth settings.
-
 ---
 
-## Configuration Reference
-
-All configuration is via environment variables.
-
-### Core
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `COVSRV_DATA` | `.` (current dir) | Base directory for data storage. Inside this directory, `covsrv_data/` holds the SQLite DB and uploaded reports. |
-
-### Authentication
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `COVSRV_AUTH_ENABLED` | `false` | Set to `true`, `1`, or `yes` to enable OAuth |
-| `COVSRV_SESSION_SECRET` | `change-me-in-production` | Secret key for signing session cookies. **Must be changed in production.** |
-| `COVSRV_AUTH_CACHE_TTL` | `60` | Seconds to cache authorization decisions |
-| `COVSRV_PUBLIC_URL` | `http://localhost:8000` | Externally-reachable base URL (used for OAuth callback URLs) |
-
-### GitHub provider
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `COVSRV_GITHUB_CLIENT_ID` | Yes | GitHub OAuth App client ID |
-| `COVSRV_GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
-
-### Gitea / Forgejo provider
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `COVSRV_GITEA_URL` | Yes | Base URL of your Gitea instance (e.g. `https://gitea.example.com`) |
-| `COVSRV_GITEA_CLIENT_ID` | Yes | Gitea OAuth2 App client ID |
-| `COVSRV_GITEA_CLIENT_SECRET` | Yes | Gitea OAuth2 App client secret |
-
----
-
-## Deployment
-
-### Docker Compose (production)
-
-```yaml
-services:
-  covsrv:
-    image: ghcr.io/sevenrats/covsrv:latest
-    ports:
-      - "8000:8000"
-    environment:
-      COVSRV_DATA: /data
-      COVSRV_AUTH_ENABLED: "true"
-      COVSRV_SESSION_SECRET: "${COVSRV_SESSION_SECRET}"
-      COVSRV_PUBLIC_URL: "https://coverage.example.com"
-      COVSRV_GITHUB_CLIENT_ID: "${COVSRV_GITHUB_CLIENT_ID}"
-      COVSRV_GITHUB_CLIENT_SECRET: "${COVSRV_GITHUB_CLIENT_SECRET}"
-    volumes:
-      - covsrv_data:/data
-    restart: unless-stopped
-
-volumes:
-  covsrv_data:
-```
-
-### Behind a reverse proxy
-
-covsrv is designed to sit behind a reverse proxy (Nginx, Caddy, Traefik, etc.)
-that handles TLS. Make sure to:
-
-1. Set `COVSRV_PUBLIC_URL` to the **external** URL users and OAuth callbacks
-   will use (e.g. `https://coverage.example.com`).
-2. Forward the `Host` header so session cookies work correctly.
-3. Proxy to port `8000` on the container.
-
-**Caddy example:**
-
-```
-coverage.example.com {
-    reverse_proxy covsrv:8000
-}
-```
-
-**Nginx example:**
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name coverage.example.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-### Data & backups
+## Data & Backups
 
 All persistent state lives under `$COVSRV_DATA/covsrv_data/`:
 
 | Path | Contents |
 |------|----------|
 | `covsrv_data/covsrv.sqlite3` | SQLite database (WAL mode) |
-| `covsrv_data/reports/` | Uploaded HTML reports and coverage artifacts |
+| `covsrv_data/reports/` | Uploaded coverage tarballs (extracted) |
 
-To back up, snapshot the entire `covsrv_data/` directory (or the Docker volume).
+Alembic migrations are applied automatically on startup. No manual migration
+steps are needed for upgrades.
 
-### Database migrations
-
-Migrations are managed by **Alembic** and are applied automatically on startup.
-No manual migration steps are needed for normal upgrades.
+To back up, snapshot the `covsrv_data/` directory (or the Docker volume).
 
 ---
 
@@ -451,7 +371,7 @@ No manual migration steps are needed for normal upgrades.
 ### Prerequisites
 
 - Python ≥ 3.13
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- [uv](https://docs.astral.sh/uv/)
 
 ### Setup
 
@@ -464,7 +384,7 @@ uv sync
 ### Running tests
 
 ```bash
-pytest
+uv run pytest
 ```
 
 ### Running locally
@@ -477,11 +397,15 @@ uvicorn main:app --reload
 
 ```
 main.py                  # FastAPI application, routes, report ingestion
+config.example.toml      # Annotated example configuration
+compose.yml              # Docker Compose file
+Dockerfile               # Container build
 covsrv/
+├── config.py            # TOML configuration manager
 ├── models.py            # SQLAlchemy ORM models
-├── db.py                # Async database layer
+├── db.py                # Async database layer + Alembic runner
 ├── auth/                # OAuth & authorization
-│   ├── config.py        #   Environment-based auth configuration
+│   ├── config.py        #   Auth configuration (env-var fallback)
 │   ├── provider.py      #   Abstract OAuthProvider base class
 │   ├── github.py        #   GitHub provider implementation
 │   ├── gitea.py         #   Gitea/Forgejo provider implementation
@@ -497,25 +421,3 @@ covsrv/
 alembic/                 # Database migrations
 tests/                   # Test suite
 ```
-
----
-
-## Roadmap
-
-- [ ] **API key creation & registration** — self-service key management to
-      replace the single shared ingest token.
-- [ ] **Scheduled cleanup task** — automatic purging of old reports and orphaned
-      data.
-- [ ] **Additional OAuth providers** — GitLab, Bitbucket, and generic
-      OIDC support.
-- [ ] **Multi-format badge output** — JSON endpoint for shields.io dynamic
-      badges.
-- [ ] **PR comment integration** — post coverage diffs as PR comments via
-      webhooks.
-- [ ] **Report diffing** — compare coverage between two commits or branches.
-
----
-
-## License
-
-See the repository for license details.
