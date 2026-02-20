@@ -421,3 +421,11 @@ covsrv/
 alembic/                 # Database migrations
 tests/                   # Test suite
 ```
+
+---
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md) — free for non-commercial use.
+Commercial use requires a separate license; contact
+[sevenrats](https://github.com/sevenrats).
