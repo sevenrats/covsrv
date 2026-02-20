@@ -41,7 +41,6 @@ from covsrv.auth import (
     require_view_permission,
     setup_auth,
 )
-from covsrv.auth.session import get_logged_in_providers
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
 from covsrv.models import DEFAULT_PROVIDER_URL, BranchEvent, Report
 
@@ -314,7 +313,29 @@ app.add_middleware(
     secret_key=_auth_cfg.session_secret,
     same_site="lax",
     https_only=_auth_cfg.public_app_url.startswith("https://"),
+    max_age=10,
 )
+
+
+# Prevent browsers from caching auth-protected responses.  Without this,
+# the browser may serve a stale cached page after logout, making it look
+# like the session was never invalidated.
+@app.middleware("http")
+async def _no_cache_protected_responses(
+    request: Request,
+    call_next,  # noqa: ANN001
+) -> Response:
+    from covsrv.auth import auth_state
+
+    response = await call_next(request)
+    # Only add the header when auth is enabled and no explicit
+    # Cache-Control was already set (e.g. badge routes set their own).
+    cfg = auth_state.config
+    if cfg is not None and cfg.enabled and "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 
 # Auth routes (/auth/{provider}/login, /auth/{provider}/callback, etc.)
 app.include_router(auth_router)
@@ -467,8 +488,6 @@ def dashboard_html_for(
     repo_full: str,
     ref: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
-    logged_in_providers: list[dict[str, str]] | None = None,
-    request_path: str = "/",
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
@@ -496,10 +515,7 @@ def dashboard_html_for(
         trend_limit=TREND_LIMIT,
         pie_limit=DEFAULT_PIE_FILES,
         github_url=github_url,
-        back_url=github_url,
         raw_framed_url=raw_framed_url,
-        logged_in_providers=logged_in_providers or [],
-        request_path=request_path,
     )
 
 
@@ -581,8 +597,6 @@ async def repo_branch_dashboard(
         repo_full,
         branch,
         provider_url=provider_url,
-        logged_in_providers=get_logged_in_providers(request),
-        request_path=str(request.url.path),
     )
 
 
@@ -635,8 +649,6 @@ def framed_html_for(
     repo_full: str,
     git_hash: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
-    logged_in_providers: list[dict[str, str]] | None = None,
-    request_path: str = "/",
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
@@ -648,10 +660,7 @@ def framed_html_for(
     return template.render(
         github_url=github_url,
         chart_url=chart_url,
-        back_url=chart_url,
         raw_src=raw_src,
-        logged_in_providers=logged_in_providers or [],
-        request_path=request_path,
     )
 
 
@@ -670,8 +679,6 @@ async def repo_hash_framed(
         repo_full,
         git_hash,
         provider_url=provider_url,
-        logged_in_providers=get_logged_in_providers(request),
-        request_path=str(request.url.path),
     )
 
 
@@ -693,8 +700,6 @@ async def repo_hash_chart(
         repo_full,
         git_hash,
         provider_url=provider_url,
-        logged_in_providers=get_logged_in_providers(request),
-        request_path=str(request.url.path),
     )
 
 

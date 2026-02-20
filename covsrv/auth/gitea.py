@@ -106,10 +106,21 @@ class GiteaProvider(OAuthProvider):
         return RepoAccess.DENIED
 
     async def is_repo_public(self, owner: str, repo: str) -> bool:
-        """Anonymous GET — 200 means public."""
+        """Anonymous GET — public only when the API confirms ``private`` is false.
+
+        Gitea may return 200 for repos visible to the anonymous requester
+        while the repo itself is marked private.  Checking the ``private``
+        field in the JSON body is the only reliable way to distinguish.
+        """
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{self._config.api_base_url}/repos/{owner}/{repo}",
                 headers={"Accept": "application/json"},
             )
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return False
+        try:
+            data = resp.json()
+        except Exception:
+            return False
+        return data.get("private") is False

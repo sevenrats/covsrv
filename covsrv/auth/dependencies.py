@@ -211,7 +211,10 @@ async def _check_public_anonymous(owner: str, name: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(api_url, headers={"Accept": "application/json"})
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return False
+        data = resp.json()
+        return data.get("private") is False
     except Exception:
         logger.warning(
             "Anonymous public-check failed for %s/%s at %s",
