@@ -22,7 +22,7 @@ class GiteaProvider(OAuthProvider):
 
     @property
     def name(self) -> str:
-        return "gitea"
+        return self._config.name
 
     async def get_authorize_url(self, state: str, redirect_uri: str) -> str:
         params = {
@@ -84,7 +84,7 @@ class GiteaProvider(OAuthProvider):
         return ProviderUser(
             id=user_id,
             username=username,
-            provider="gitea",
+            provider=self.name,
         )
 
     async def can_view_repo(

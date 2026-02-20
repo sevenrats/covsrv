@@ -4,7 +4,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      COVSRV_DIR: /data
+      COVSRV_DATA: /data
       # optional but common:
       # TZ: America/Toronto
     volumes:

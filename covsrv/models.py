@@ -25,6 +25,9 @@ class Report(Base):
     provider_url: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'https://github.com'")
     )
+    provider_name: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
 
     __table_args__ = (
         UniqueConstraint("repo", "git_hash", name="uq_reports_repo_hash"),

@@ -42,6 +42,7 @@ from covsrv.auth import (
     setup_auth,
 )
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
+from covsrv.config import ConfigManager
 from covsrv.models import DEFAULT_PROVIDER_URL, BranchEvent, Report
 
 _jinja_env = Environment(
@@ -53,7 +54,7 @@ _jinja_env = Environment(
 # Configuration
 # ----------------------------
 
-BASE_DIR = Path(os.environ.get("COVSRV_DIR", ".")).resolve()
+BASE_DIR = Path(os.environ.get("COVSRV_DATA", ".")).resolve()
 
 DATA_DIR = BASE_DIR / "covsrv_data"
 REPORTS_DIR = DATA_DIR / "reports"  # stored per repo/hash (immutable for a sha)
@@ -61,6 +62,25 @@ DB_PATH = DATA_DIR / "covsrv.sqlite3"
 
 TOKEN_HASH = "$argon2id$v=19$m=65536,t=3,p=4$nxSTXtitRlXKAuwz1PxVWQ$G+XQZgF+DURfAptK/v3zFjjO9vzexX1bQ/jxPAcAYBY"
 ph = PasswordHasher()
+
+# Module-level ConfigManager (populated during lifespan)
+config_manager: ConfigManager | None = None
+
+
+def _resolve_config_path() -> Path:
+    """Return the resolved TOML config file path.
+
+    ``COVSRV_CONF`` may point to either a file or a directory.  When it
+    is a directory we look for ``config.toml`` inside it.
+    """
+    raw = os.environ.get("COVSRV_CONF", "")
+    if raw:
+        p = Path(raw)
+        if p.is_dir():
+            return p / "config.toml"
+        return p
+    return BASE_DIR / "config.toml"
+
 
 DEFAULT_WORST_FILES = 12
 DEFAULT_PIE_FILES = 12
@@ -109,7 +129,8 @@ class ReportIngestDTO:
     repo_full: str
     branch: str
     sha: str
-    provider_url: str
+    provider_name: str
+    provider_url: str  # derived from config
 
     @classmethod
     def from_form(
@@ -118,6 +139,7 @@ class ReportIngestDTO:
         repo: str,
         branch: str,
         sha: str,
+        provider_name: str,
         provider_url: str = DEFAULT_PROVIDER_URL,
     ) -> "ReportIngestDTO":
         owner_s, repo_s, repo_full = normalize_owner_repo(owner, repo)
@@ -129,6 +151,8 @@ class ReportIngestDTO:
         branch_s = branch.strip()
 
         sha_s = normalize_sha(sha)
+
+        pname = provider_name.strip() if isinstance(provider_name, str) else ""
 
         purl = (
             provider_url.strip().rstrip("/")
@@ -142,6 +166,7 @@ class ReportIngestDTO:
             repo_full=repo_full,
             branch=branch_s,
             sha=sha_s,
+            provider_name=pname,
             provider_url=purl,
         )
 
@@ -170,6 +195,21 @@ def verify_token(token: str) -> None:
             raise HTTPException(status_code=401, detail="Invalid token")
     except VerifyMismatchError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def verify_report_access(token: str, provider_name: str, owner: str, repo: str) -> None:
+    """Verify *token* is authorised to post a report.
+
+    Uses the ``ConfigManager`` (hierarchical keys) when a config file is
+    loaded.  Falls back to the legacy argon2 ``TOKEN_HASH`` otherwise.
+    """
+    if config_manager is not None:
+        if config_manager.verify_report_key(token, provider_name, owner, repo):
+            return
+        raise HTTPException(status_code=401, detail="Invalid report key")
+
+    # Legacy fallback: single global token hash
+    verify_token(token)
 
 
 # ----------------------------
@@ -224,10 +264,20 @@ def safe_extract_tar(tar_path: Path, dest_dir: Path) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
+    global config_manager
+
     await init_dirs()
     db.configure(DB_PATH)
     await db.init_db()
-    await setup_auth()
+
+    # Load declarative config if available
+    config_path = _resolve_config_path()
+    if config_path.is_file():
+        config_manager = ConfigManager.from_file(config_path)
+    else:
+        config_manager = None
+
+    await setup_auth(config_manager)
     yield
 
 
@@ -307,13 +357,24 @@ app = FastAPI(
 )
 
 # Session middleware (required for OAuth flows)
-_auth_cfg = load_auth_config()
+# Read session settings from the TOML config (if available) so the middleware
+# uses the correct secret and https flag.  Env-var config is the fallback.
+_config_path = _resolve_config_path()
+if _config_path.is_file():
+    _boot_cfg = ConfigManager.from_file(_config_path)
+    _session_secret = _boot_cfg.global_config.session_secret
+    _https_only = _boot_cfg.global_config.public_url.startswith("https://")
+else:
+    _boot_auth = load_auth_config()
+    _session_secret = _boot_auth.session_secret
+    _https_only = _boot_auth.public_app_url.startswith("https://")
+
 app.add_middleware(
     SessionMiddleware,  # type: ignore[arg-type]  # Starlette typing limitation
-    secret_key=_auth_cfg.session_secret,
+    secret_key=_session_secret,
     same_site="lax",
-    https_only=_auth_cfg.public_app_url.startswith("https://"),
-    max_age=10,
+    https_only=_https_only,
+    max_age=10,  # 14 days
 )
 
 
@@ -373,7 +434,8 @@ async def ingest_report(
     repo: str = Form(...),
     branch: str = Form(...),
     sha: str = Form(...),
-    provider_url: str = Form(default=DEFAULT_PROVIDER_URL),
+    provider: str = Form(default=""),
+    provider_url: str = Form(default=""),
     tarball: UploadFile = File(
         ...
     ),  # expects .tar.gz with HTML + coverage.xml at top of html dir
@@ -381,9 +443,35 @@ async def ingest_report(
     x_access_token: str | None = Header(default=None, convert_underscores=False),
 ) -> dict[str, Any]:
     token = extract_token(authorization, x_access_token)
-    verify_token(token)
 
-    dto = ReportIngestDTO.from_form(owner, repo, branch, sha, provider_url)
+    # Resolve provider name → URL from config, or accept raw URL for legacy
+    pname = provider.strip() if provider else ""
+    purl = provider_url.strip().rstrip("/") if provider_url else ""
+
+    if config_manager is not None:
+        # Config-driven mode: provider name is required
+        if not pname:
+            raise HTTPException(
+                status_code=422,
+                detail="'provider' field is required when a config file is loaded",
+            )
+        entry = config_manager.get_provider(pname)
+        if entry is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown provider: {pname!r}",
+            )
+        purl = entry.url
+    else:
+        # Legacy mode: fall back to provider_url if no name given
+        if not pname:
+            pname = ""
+        if not purl:
+            purl = DEFAULT_PROVIDER_URL
+
+    verify_report_access(token, pname, owner.strip(), repo.strip())
+
+    dto = ReportIngestDTO.from_form(owner, repo, branch, sha, pname, purl)
     received_ts = int(time.time())
 
     repo_fs = repo_to_fs(dto.repo_full)
@@ -439,6 +527,7 @@ async def ingest_report(
             overall_percent=overall_percent,
             report_dir=str(report_dir),
             provider_url=dto.provider_url,
+            provider_name=dto.provider_name,
         )
         sess.add(report)
         try:
@@ -481,6 +570,21 @@ async def ingest_report(
 # ----------------------------
 # Dashboards (HTML)
 # ----------------------------
+
+
+def _resolve_provider_url(row: dict[str, Any] | None) -> str:
+    """Resolve provider URL from a report row, preferring config lookup."""
+    if row is None:
+        return DEFAULT_PROVIDER_URL
+    # If we have a provider_name and config, look up the URL from config
+    pname = row.get("provider_name", "")
+    if pname and config_manager is not None:
+        entry = config_manager.get_provider(pname)
+        if entry:
+            return entry.url
+    # Fallback to stored provider_url
+    purl = row.get("provider_url", "")
+    return purl if purl else DEFAULT_PROVIDER_URL
 
 
 def dashboard_html_for(
@@ -586,12 +690,11 @@ async def repo_branch_dashboard(
     request: Request, owner: str, name: str, branch: str
 ) -> str:
     repo_full = repo_from_owner_name(owner, name)
-    provider_url = DEFAULT_PROVIDER_URL
     head_hash = await db.latest_branch_head_hash(repo_full, branch)
+    row = None
     if head_hash:
         row = await db.latest_report_for_repo_hash(repo_full, head_hash)
-        if row and row.get("provider_url"):
-            provider_url = row["provider_url"]
+    provider_url = _resolve_provider_url(row)
     return dashboard_html_for(
         "b",
         repo_full,
@@ -672,9 +775,7 @@ async def repo_hash_framed(
 ) -> str:
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(repo_full, git_hash)
-    provider_url = (
-        row["provider_url"] if row and row.get("provider_url") else DEFAULT_PROVIDER_URL
-    )
+    provider_url = _resolve_provider_url(row)
     return framed_html_for(
         repo_full,
         git_hash,
@@ -692,9 +793,7 @@ async def repo_hash_chart(
 ) -> str:
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(repo_full, git_hash)
-    provider_url = (
-        row["provider_url"] if row and row.get("provider_url") else DEFAULT_PROVIDER_URL
-    )
+    provider_url = _resolve_provider_url(row)
     return dashboard_html_for(
         "h",
         repo_full,
