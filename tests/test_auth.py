@@ -414,10 +414,10 @@ class TestAuthCallbackRoute:
         assert state_match is not None
         state = state_match.group(1)
 
+        auth_client.cookies = cookies
         resp = await auth_client.get(
             f"/auth/fakeprov/callback?state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         assert resp.status_code == 400
 
@@ -447,10 +447,10 @@ class TestAuthCallbackRoute:
         state = state_match.group(1)
 
         # 2. Simulate callback
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         assert cb_resp.status_code == 307
         assert "/alice/proj/b/main" in cb_resp.headers["location"]
@@ -484,10 +484,10 @@ class TestAuthLogoutRoute:
         state_match = re.search(r"state=([^&]+)", login_resp.headers["location"])
         assert state_match is not None
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state_match.group(1)}",
             follow_redirects=False,
-            cookies=cookies,
         )
         assert cb_resp.status_code == 307
         session_cookies = cb_resp.cookies
@@ -504,28 +504,28 @@ class TestAuthLogoutRoute:
         )
 
         # 3. Verify session works (accessing protected page succeeds)
+        auth_client.cookies = session_cookies
         dash_resp = await auth_client.get(
             "/alice/proj/b/main",
             follow_redirects=False,
-            cookies=session_cookies,
         )
         assert dash_resp.status_code == 200
 
         # 4. Logout
+        auth_client.cookies = session_cookies
         logout_resp = await auth_client.get(
             "/auth/fakeprov/logout?next=/",
             follow_redirects=False,
-            cookies=session_cookies,
         )
         assert logout_resp.status_code == 307
         assert logout_resp.headers["location"] == "/"
         cleared_cookies = logout_resp.cookies
 
         # 5. Access the protected page again — should redirect to login
+        auth_client.cookies = cleared_cookies
         post_logout = await auth_client.get(
             "/alice/proj/b/main",
             follow_redirects=False,
-            cookies=cleared_cookies,
         )
         assert post_logout.status_code == 307
         assert "/auth/fakeprov/login" in post_logout.headers["location"]
@@ -543,10 +543,10 @@ class TestAuthLogoutRoute:
         state_match = re.search(r"state=([^&]+)", login_resp.headers["location"])
         assert state_match is not None
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state_match.group(1)}",
             follow_redirects=False,
-            cookies=cookies,
         )
         session_cookies = cb_resp.cookies
 
@@ -562,20 +562,20 @@ class TestAuthLogoutRoute:
         )
 
         # 3. Logout all
+        auth_client.cookies = session_cookies
         logout_resp = await auth_client.get(
             "/auth/logout?next=/",
             follow_redirects=False,
-            cookies=session_cookies,
         )
         assert logout_resp.status_code == 307
         assert logout_resp.headers["location"] == "/"
         cleared_cookies = logout_resp.cookies
 
         # 4. Protected page should require login
+        auth_client.cookies = cleared_cookies
         post_logout = await auth_client.get(
             "/alice/proj/b/main",
             follow_redirects=False,
-            cookies=cleared_cookies,
         )
         assert post_logout.status_code == 307
         assert "/auth/fakeprov/login" in post_logout.headers["location"]
@@ -664,18 +664,18 @@ class TestRequireViewPermission:
         assert m is not None
         state = m.group(1)
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         # Merge cookies
         session_cookies = cb_resp.cookies
 
         # Now access a protected page
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/alice/proj/b/main",
-            cookies=session_cookies,
         )
         assert resp.status_code == 200
 
@@ -705,17 +705,17 @@ class TestRequireViewPermission:
         m = re.search(r"state=([^&]+)", login_resp.headers["location"])
         assert m is not None
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={m.group(1)}",
             follow_redirects=False,
-            cookies=cookies,
         )
         session_cookies = cb_resp.cookies
 
         # Access dashboard
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/alice/proj/b/main",
-            cookies=session_cookies,
         )
         assert resp.status_code == 200
         cc = resp.headers.get("cache-control", "")
@@ -749,17 +749,17 @@ class TestRequireViewPermission:
         assert m is not None
         state = m.group(1)
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         session_cookies = cb_resp.cookies
 
         # "private-repo" is denied by _FakeProvider.can_view_repo
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/alice/private-repo/b/main",
-            cookies=session_cookies,
             follow_redirects=False,
         )
         assert resp.status_code == 403
@@ -791,17 +791,17 @@ class TestRequireViewPermission:
         assert m is not None
         state = m.group(1)
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         session_cookies = cb_resp.cookies
 
         # API request for denied repo → 404
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/api/alice/private-repo/b/main/trend",
-            cookies=session_cookies,
             follow_redirects=False,
             headers={"Accept": "application/json"},
         )
@@ -833,17 +833,17 @@ class TestRequireViewPermission:
         assert m is not None
         state = m.group(1)
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         session_cookies = cb_resp.cookies
 
         # Access repo whose token is "expired" → should redirect to login
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/alice/expired-repo/b/main",
-            cookies=session_cookies,
             follow_redirects=False,
         )
         assert resp.status_code == 307
