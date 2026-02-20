@@ -84,6 +84,7 @@ jobs:
           echo "POSTing tarball to $REPORTS_ENDPOINT_URL ..."
           curl -fsS \
             -H "Authorization: Bearer $COV_TOKEN" \
+            -F "provider=github" \
             -F "owner=$OWNER" \
             -F "repo=$REPO" \
             -F "branch=$BRANCH" \

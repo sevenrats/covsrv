@@ -54,7 +54,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      COVSRV_DIR: /data
+      COVSRV_DATA: /data
     volumes:
       - covsrv_data:/data
     restart: unless-stopped
@@ -340,7 +340,7 @@ All configuration is via environment variables.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COVSRV_DIR` | `.` (current dir) | Base directory for data storage. Inside this directory, `covsrv_data/` holds the SQLite DB and uploaded reports. |
+| `COVSRV_DATA` | `.` (current dir) | Base directory for data storage. Inside this directory, `covsrv_data/` holds the SQLite DB and uploaded reports. |
 
 ### Authentication
 
@@ -379,7 +379,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      COVSRV_DIR: /data
+      COVSRV_DATA: /data
       COVSRV_AUTH_ENABLED: "true"
       COVSRV_SESSION_SECRET: "${COVSRV_SESSION_SECRET}"
       COVSRV_PUBLIC_URL: "https://coverage.example.com"
@@ -430,7 +430,7 @@ server {
 
 ### Data & backups
 
-All persistent state lives under `$COVSRV_DIR/covsrv_data/`:
+All persistent state lives under `$COVSRV_DATA/covsrv_data/`:
 
 | Path | Contents |
 |------|----------|

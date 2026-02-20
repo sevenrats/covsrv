@@ -119,13 +119,18 @@ class TestNormalizeSha:
 class TestReportIngestDTO:
     def test_from_form_valid(self):
         dto = app_module.ReportIngestDTO.from_form(
-            owner="alice", repo="proj", branch="main", sha="abc1234567"
+            owner="alice",
+            repo="proj",
+            branch="main",
+            sha="abc1234567",
+            provider_name="myprov",
         )
         assert dto.owner == "alice"
         assert dto.repo == "proj"
         assert dto.repo_full == "alice/proj"
         assert dto.branch == "main"
         assert dto.sha == "abc1234567"
+        assert dto.provider_name == "myprov"
         assert dto.provider_url == "https://github.com"
 
     def test_from_form_with_provider_url(self):
@@ -134,6 +139,7 @@ class TestReportIngestDTO:
             repo="proj",
             branch="main",
             sha="abc1234567",
+            provider_name="myprov",
             provider_url="https://gitlab.com",
         )
         assert dto.provider_url == "https://gitlab.com"
@@ -144,6 +150,7 @@ class TestReportIngestDTO:
             repo="proj",
             branch="main",
             sha="abc1234567",
+            provider_name="myprov",
             provider_url="https://gitlab.com/",
         )
         assert dto.provider_url == "https://gitlab.com"
@@ -154,34 +161,39 @@ class TestReportIngestDTO:
             repo="proj",
             branch="main",
             sha="abc1234567",
+            provider_name="myprov",
             provider_url="",
         )
         assert dto.provider_url == "https://github.com"
 
-    def test_to_dict(self):
+    def test_empty_provider_name_allowed_in_legacy_mode(self):
         dto = app_module.ReportIngestDTO.from_form(
-            owner="alice", repo="proj", branch="main", sha="abc1234567"
+            owner="alice",
+            repo="proj",
+            branch="main",
+            sha="abc1234567",
+            provider_name="",
         )
-        d = dto.to_dict()
-        assert d == {
-            "owner": "alice",
-            "repo": "proj",
-            "repo_full": "alice/proj",
-            "branch": "main",
-            "sha": "abc1234567",
-            "provider_url": "https://github.com",
-        }
+        assert dto.provider_name == ""
 
     def test_empty_branch_raises(self):
         with pytest.raises(HTTPException):
             app_module.ReportIngestDTO.from_form(
-                owner="alice", repo="proj", branch="", sha="abc1234567"
+                owner="alice",
+                repo="proj",
+                branch="",
+                sha="abc1234567",
+                provider_name="myprov",
             )
 
     def test_short_sha_raises(self):
         with pytest.raises(HTTPException):
             app_module.ReportIngestDTO.from_form(
-                owner="alice", repo="proj", branch="main", sha="abc"
+                owner="alice",
+                repo="proj",
+                branch="main",
+                sha="abc",
+                provider_name="myprov",
             )
 
 
@@ -453,6 +465,7 @@ async def seed_report(
     received_ts: int = 1700000000,
     coverage_xml: str = SAMPLE_COVERAGE_XML,
     provider_url: str = "https://github.com",
+    provider_name: str = "",
 ):
     """Seed a report record + write the HTML directory with coverage.xml."""
     repo_fs = app_module.repo_to_fs(repo_full)
@@ -478,6 +491,7 @@ async def seed_report(
                 overall_percent=overall_percent,
                 report_dir=str(report_dir),
                 provider_url=provider_url,
+                provider_name=provider_name,
             )
         )
         stmt = sqlite_insert(BranchHead).values(
@@ -851,10 +865,10 @@ class TestDownloads:
 class TestIngestReport:
     @pytest_asyncio.fixture()
     async def auth_client(self, initialized_db, tmp_data_dir):
-        """Client with extract_token and verify_token monkeypatched to bypass auth."""
+        """Client with extract_token and verify_report_access monkeypatched to bypass auth."""
         with (
             patch.object(app_module, "extract_token", return_value="dummy-token"),
-            patch.object(app_module, "verify_token", return_value=None),
+            patch.object(app_module, "verify_report_access", return_value=None),
         ):
             transport = ASGITransport(app=app_module.app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -869,6 +883,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": "feed1234567890abcdef1234567890abcdef12345",
+                "provider_url": "https://github.com",
             },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
             headers={"x-access-token": "dummy"},
@@ -886,7 +901,13 @@ class TestIngestReport:
         sha = "dupe1234567890abcdef1234567890abcdef12345"
         resp1 = await auth_client.post(
             "/reports",
-            data={"owner": "alice", "repo": "proj", "branch": "main", "sha": sha},
+            data={
+                "owner": "alice",
+                "repo": "proj",
+                "branch": "main",
+                "sha": sha,
+                "provider_url": "https://github.com",
+            },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
             headers={"x-access-token": "dummy"},
         )
@@ -895,7 +916,13 @@ class TestIngestReport:
         tarball2 = make_tarball_bytes()
         resp2 = await auth_client.post(
             "/reports",
-            data={"owner": "alice", "repo": "proj", "branch": "main", "sha": sha},
+            data={
+                "owner": "alice",
+                "repo": "proj",
+                "branch": "main",
+                "sha": sha,
+                "provider_url": "https://github.com",
+            },
             files={"tarball": ("report.tar.gz", tarball2, "application/gzip")},
             headers={"x-access-token": "dummy"},
         )
@@ -920,6 +947,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": "noxml234567890abcdef1234567890abcdef12345",
+                "provider_url": "https://github.com",
             },
             files={"tarball": ("report.tar.gz", buf.read(), "application/gzip")},
             headers={"x-access-token": "dummy"},

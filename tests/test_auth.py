@@ -501,6 +501,7 @@ class TestAuthLogoutRoute:
             tmp_data_dir,
             repo_full="alice/proj",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # 3. Verify session works (accessing protected page succeeds)
@@ -559,6 +560,7 @@ class TestAuthLogoutRoute:
             tmp_data_dir,
             repo_full="alice/proj",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # 3. Logout all
@@ -602,6 +604,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/proj",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         resp = await auth_client.get(
@@ -628,6 +631,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/proj",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         resp = await auth_client.get(
@@ -649,6 +653,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/proj",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # Do a full login flow
@@ -692,6 +697,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/proj",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # Login
@@ -734,6 +740,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/private-repo",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # Login first
@@ -776,6 +783,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/private-repo",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # Login first
@@ -818,6 +826,7 @@ class TestRequireViewPermission:
             tmp_data_dir,
             repo_full="alice/expired-repo",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         # Login first
@@ -877,6 +886,7 @@ class TestPublicRepoBypass:
             tmp_data_dir,
             repo_full="alice/public-repo",
             provider_url="https://fake.example.com",
+            provider_name="fakeprov",
         )
 
         resp = await auth_client.get(

@@ -1,0 +1,78 @@
+# =============================================================================
+# covsrv configuration file
+# =============================================================================
+#
+# This file is the single source of truth for provider definitions,
+# report keys, and global settings.
+#
+# Report keys are hierarchical.  A key defined at a broader scope
+# authorises posting for everything within that scope:
+#
+#   global  →  provider  →  owner  →  repo
+#
+# For example, the global report_key can push reports for any repo on
+# any provider, while a repo-level key only works for that one repo.
+#
+# Provider names must be unique and URL-safe (letters, digits, - and _).
+# They are used in OAuth callback URLs and in the reports API.
+
+
+# ---------------------------------------------------------------------------
+# Global settings
+# ---------------------------------------------------------------------------
+
+[global]
+
+# Master report key — authorises posting for ANY repo on ANY provider.
+# Remove or leave empty to disable the global key.
+report_key = "change-me-global-secret"
+
+# Externally-reachable base URL of this server (used for OAuth callbacks).
+public_url = "http://localhost:8000"
+
+# Secret used to sign session cookies.
+session_secret = "change-me-in-production"
+
+# Set to true to require OAuth login for viewing private repos.
+auth_enabled = false
+
+# How long (seconds) to cache authorization decisions.
+auth_cache_ttl = 60
+
+
+# ---------------------------------------------------------------------------
+# Providers
+# ---------------------------------------------------------------------------
+# Each [[providers.<name>]] block defines a code-forge backend.
+# You can define multiple providers of the same type (e.g. two Gitea
+# instances), as long as each has a unique name.
+
+
+# -- Example: GitHub --------------------------------------------------------
+
+[providers.github]
+type      = "github"
+url       = "https://github.com"
+report_key = "change-me-github-provider-key"
+
+# OAuth credentials (optional — needed only if auth_enabled = true).
+# client_id     = "Iv1.xxxxxxxxxxxx"
+# client_secret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+
+# -- Example: Self-hosted Gitea ---------------------------------------------
+
+# [providers.my-gitea]
+# type          = "gitea"
+# url           = "https://gitea.example.com"
+# report_key    = "change-me-gitea-provider-key"
+# client_id     = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+# client_secret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+#
+#   # Owner-level key — authorises posting for every repo under this owner.
+#   [providers.my-gitea.owners.sevenrats]
+#   report_key = "change-me-owner-key"
+#
+#   # Repo-level key — authorises posting for this one repo only.
+#   [providers.my-gitea.repos."sevenrats/covsrv"]
+#   report_key = "change-me-repo-key"

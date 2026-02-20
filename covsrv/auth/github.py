@@ -22,7 +22,7 @@ class GitHubProvider(OAuthProvider):
 
     @property
     def name(self) -> str:
-        return "github"
+        return self._config.name
 
     async def get_authorize_url(self, state: str, redirect_uri: str) -> str:
         params = {
@@ -73,7 +73,7 @@ class GitHubProvider(OAuthProvider):
         return ProviderUser(
             id=str(data["id"]),
             username=data["login"],
-            provider="github",
+            provider=self.name,
         )
 
     async def can_view_repo(

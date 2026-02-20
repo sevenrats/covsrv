@@ -160,6 +160,7 @@ async def latest_report_for_repo_hash(
             "overall_percent": row.overall_percent,
             "report_dir": row.report_dir,
             "provider_url": row.provider_url,
+            "provider_name": row.provider_name,
         }
 
 
@@ -218,6 +219,22 @@ async def provider_url_for_repo(repo: str) -> str | None:
         result = await sess.execute(stmt)
         row = result.first()
         return None if row is None else str(row[0])
+
+
+async def provider_name_for_repo(repo: str) -> str | None:
+    """Return the ``provider_name`` from the most recent report for *repo*."""
+    async with session() as sess:
+        stmt = (
+            select(Report.provider_name)
+            .where(Report.repo == repo)
+            .order_by(Report.received_ts.desc())
+            .limit(1)
+        )
+        result = await sess.execute(stmt)
+        row = result.first()
+        if row is None or not row[0]:
+            return None
+        return str(row[0])
 
 
 async def report_percent_for_hashes(
