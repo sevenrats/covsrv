@@ -374,7 +374,7 @@ app.add_middleware(
     secret_key=_session_secret,
     same_site="lax",
     https_only=_https_only,
-    max_age=14 * 24 * 60 * 60,  # 14 days
+    max_age=10,  # 14 days
 )
 
 
