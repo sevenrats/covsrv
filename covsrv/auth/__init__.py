@@ -127,6 +127,23 @@ async def setup_auth(config_manager: "ConfigManager | None" = None) -> None:
             from covsrv.auth.gitea import GiteaProvider
 
             providers[name] = GiteaProvider(pconfig)
+    # Also create provider instances for non-OAuth-configured providers.
+    # These are used for anonymous public-repo checks — they can't do
+    # OAuth login, but they can tell us whether a repo is public.
+    if config_manager is not None:
+        for name, entry in config_manager.providers.items():
+            if name in providers:
+                continue  # already built from OAuth config
+            pconfig = config_manager.to_auth_provider_config(entry)
+            if entry.type == "github":
+                from covsrv.auth.github import GitHubProvider
+
+                providers[name] = GitHubProvider(pconfig)
+            elif entry.type == "gitea":
+                from covsrv.auth.gitea import GiteaProvider
+
+                providers[name] = GiteaProvider(pconfig)
+
     auth_state.providers = providers
 
     # Wire up the repo → provider lookup.
@@ -160,7 +177,7 @@ def _make_repo_provider_lookup(
 
         # Fast path: provider_name stored directly
         pname = await _db.provider_name_for_repo(repo_full)
-        if pname and pname in config.providers:
+        if pname and pname in auth_state.providers:
             return pname
 
         # Fallback: resolve via provider_url
@@ -174,8 +191,7 @@ def _make_repo_provider_lookup(
             # Try all configured providers (including non-OAuth)
             for url, name in all_url_to_name.items():
                 if purl == url or purl.startswith(url + "/"):
-                    # Found in config but not OAuth-enabled
-                    if name in config.providers:
+                    if name in auth_state.providers:
                         return name
 
         # Last resort: if there is exactly one OAuth provider, use it.
