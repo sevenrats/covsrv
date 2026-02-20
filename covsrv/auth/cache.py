@@ -61,6 +61,14 @@ class AuthzCache:
         with self._lock:
             self._cache.clear()
 
+    def clear_user(self, provider: str, user_id: str) -> None:
+        """Drop all cached entries for a specific provider + user."""
+        prefix = f"{provider}\x00{user_id}\x00"
+        with self._lock:
+            keys = [k for k in self._cache if k.startswith(prefix)]
+            for k in keys:
+                del self._cache[k]
+
     # ------------------------------------------------------------------ internal
 
     def _evict_expired(self) -> None:

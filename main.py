@@ -34,6 +34,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from covsrv import db
 from covsrv.auth import (
+    AccessDenied,
     AuthenticationRequired,
     auth_router,
     load_auth_config,
@@ -312,7 +313,29 @@ app.add_middleware(
     secret_key=_auth_cfg.session_secret,
     same_site="lax",
     https_only=_auth_cfg.public_app_url.startswith("https://"),
+    max_age=10,
 )
+
+
+# Prevent browsers from caching auth-protected responses.  Without this,
+# the browser may serve a stale cached page after logout, making it look
+# like the session was never invalidated.
+@app.middleware("http")
+async def _no_cache_protected_responses(
+    request: Request,
+    call_next,  # noqa: ANN001
+) -> Response:
+    from covsrv.auth import auth_state
+
+    response = await call_next(request)
+    # Only add the header when auth is enabled and no explicit
+    # Cache-Control was already set (e.g. badge routes set their own).
+    cfg = auth_state.config
+    if cfg is not None and cfg.enabled and "Cache-Control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
 
 # Auth routes (/auth/{provider}/login, /auth/{provider}/callback, etc.)
 app.include_router(auth_router)
@@ -324,6 +347,16 @@ async def _auth_required_redirect(
 ) -> RedirectResponse:
     login_url = f"/auth/{exc.provider}/login?next={_url_quote(exc.next_url, safe='')}"
     return RedirectResponse(url=login_url, status_code=307)
+
+
+@app.exception_handler(AccessDenied)
+async def _access_denied_page(
+    request: Request,
+    exc: AccessDenied,  # noqa: ARG001
+) -> HTMLResponse:
+    template = _jinja_env.get_template("access_denied.html")
+    html = template.render(owner=exc.owner, name=exc.name)
+    return HTMLResponse(content=html, status_code=403)
 
 
 # Convenience alias used as a route-level dependency on protected endpoints.
@@ -451,7 +484,10 @@ async def ingest_report(
 
 
 def dashboard_html_for(
-    kind: str, repo_full: str, ref: str, provider_url: str = DEFAULT_PROVIDER_URL
+    kind: str,
+    repo_full: str,
+    ref: str,
+    provider_url: str = DEFAULT_PROVIDER_URL,
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
@@ -479,7 +515,6 @@ def dashboard_html_for(
         trend_limit=TREND_LIMIT,
         pie_limit=DEFAULT_PIE_FILES,
         github_url=github_url,
-        back_url=github_url,
         raw_framed_url=raw_framed_url,
     )
 
@@ -547,7 +582,9 @@ async def repo_home(owner: str, name: str) -> RedirectResponse:
 @app.get(
     "/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse, dependencies=_authn
 )
-async def repo_branch_dashboard(owner: str, name: str, branch: str) -> str:
+async def repo_branch_dashboard(
+    request: Request, owner: str, name: str, branch: str
+) -> str:
     repo_full = repo_from_owner_name(owner, name)
     provider_url = DEFAULT_PROVIDER_URL
     head_hash = await db.latest_branch_head_hash(repo_full, branch)
@@ -555,7 +592,12 @@ async def repo_branch_dashboard(owner: str, name: str, branch: str) -> str:
         row = await db.latest_report_for_repo_hash(repo_full, head_hash)
         if row and row.get("provider_url"):
             provider_url = row["provider_url"]
-    return dashboard_html_for("b", repo_full, branch, provider_url=provider_url)
+    return dashboard_html_for(
+        "b",
+        repo_full,
+        branch,
+        provider_url=provider_url,
+    )
 
 
 # ----------------------------
@@ -604,7 +646,9 @@ async def raw_hash_file(
 
 
 def framed_html_for(
-    repo_full: str, git_hash: str, provider_url: str = DEFAULT_PROVIDER_URL
+    repo_full: str,
+    git_hash: str,
+    provider_url: str = DEFAULT_PROVIDER_URL,
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
@@ -616,7 +660,6 @@ def framed_html_for(
     return template.render(
         github_url=github_url,
         chart_url=chart_url,
-        back_url=chart_url,
         raw_src=raw_src,
     )
 
@@ -624,13 +667,19 @@ def framed_html_for(
 @app.get(
     "/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse, dependencies=_authn
 )
-async def repo_hash_framed(owner: str, name: str, git_hash: str) -> str:
+async def repo_hash_framed(
+    request: Request, owner: str, name: str, git_hash: str
+) -> str:
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(repo_full, git_hash)
     provider_url = (
         row["provider_url"] if row and row.get("provider_url") else DEFAULT_PROVIDER_URL
     )
-    return framed_html_for(repo_full, git_hash, provider_url=provider_url)
+    return framed_html_for(
+        repo_full,
+        git_hash,
+        provider_url=provider_url,
+    )
 
 
 @app.get(
@@ -638,13 +687,20 @@ async def repo_hash_framed(owner: str, name: str, git_hash: str) -> str:
     response_class=HTMLResponse,
     dependencies=_authn,
 )
-async def repo_hash_chart(owner: str, name: str, git_hash: str) -> str:
+async def repo_hash_chart(
+    request: Request, owner: str, name: str, git_hash: str
+) -> str:
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(repo_full, git_hash)
     provider_url = (
         row["provider_url"] if row and row.get("provider_url") else DEFAULT_PROVIDER_URL
     )
-    return dashboard_html_for("h", repo_full, git_hash, provider_url=provider_url)
+    return dashboard_html_for(
+        "h",
+        repo_full,
+        git_hash,
+        provider_url=provider_url,
+    )
 
 
 # ----------------------------

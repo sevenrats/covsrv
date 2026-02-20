@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import httpx
 
 from covsrv.auth.config import ProviderConfig
-from covsrv.auth.provider import OAuthProvider, ProviderUser, TokenResponse
+from covsrv.auth.provider import OAuthProvider, ProviderUser, RepoAccess, TokenResponse
 
 
 class GiteaProvider(OAuthProvider):
@@ -87,8 +87,10 @@ class GiteaProvider(OAuthProvider):
             provider="gitea",
         )
 
-    async def can_view_repo(self, access_token: str, owner: str, repo: str) -> bool:
-        """GET /api/v1/repos/{owner}/{repo} — 200 means visible."""
+    async def can_view_repo(
+        self, access_token: str, owner: str, repo: str
+    ) -> RepoAccess:
+        """GET /api/v1/repos/{owner}/{repo} — 200 means visible, 401 means token expired."""
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{self._config.api_base_url}/repos/{owner}/{repo}",
@@ -97,13 +99,28 @@ class GiteaProvider(OAuthProvider):
                     "Accept": "application/json",
                 },
             )
-        return resp.status_code == 200
+        if resp.status_code == 200:
+            return RepoAccess.ALLOWED
+        if resp.status_code == 401:
+            return RepoAccess.TOKEN_EXPIRED
+        return RepoAccess.DENIED
 
     async def is_repo_public(self, owner: str, repo: str) -> bool:
-        """Anonymous GET — 200 means public."""
+        """Anonymous GET — public only when the API confirms ``private`` is false.
+
+        Gitea may return 200 for repos visible to the anonymous requester
+        while the repo itself is marked private.  Checking the ``private``
+        field in the JSON body is the only reliable way to distinguish.
+        """
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{self._config.api_base_url}/repos/{owner}/{repo}",
                 headers={"Accept": "application/json"},
             )
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return False
+        try:
+            data = resp.json()
+        except Exception:
+            return False
+        return data.get("private") is False

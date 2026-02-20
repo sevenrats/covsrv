@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import enum
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+
+class RepoAccess(enum.Enum):
+    """Result of a ``can_view_repo`` check."""
+
+    ALLOWED = "allowed"
+    DENIED = "denied"
+    TOKEN_EXPIRED = "token_expired"
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,8 +78,15 @@ class OAuthProvider(ABC):
         ...
 
     @abstractmethod
-    async def can_view_repo(self, access_token: str, owner: str, repo: str) -> bool:
-        """Return True iff the token bearer can view ``owner/repo``."""
+    async def can_view_repo(
+        self, access_token: str, owner: str, repo: str
+    ) -> RepoAccess:
+        """Check whether the token bearer can view ``owner/repo``.
+
+        Returns ``RepoAccess.ALLOWED``, ``RepoAccess.DENIED``, or
+        ``RepoAccess.TOKEN_EXPIRED`` (when the provider responds with
+        401, indicating the OAuth token has been revoked or expired).
+        """
         ...
 
     async def is_repo_public(self, owner: str, repo: str) -> bool:
@@ -81,7 +97,9 @@ class OAuthProvider(ABC):
         """
         return False
 
-    async def can_view(self, access_token: str, resource: ResourceDescriptor) -> bool:
+    async def can_view(
+        self, access_token: str, resource: ResourceDescriptor
+    ) -> RepoAccess:
         """Check if the user can view the given resource.
 
         Default implementation delegates to the repo-level check.

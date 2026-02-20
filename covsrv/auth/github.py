@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 import httpx
 
 from covsrv.auth.config import ProviderConfig
-from covsrv.auth.provider import OAuthProvider, ProviderUser, TokenResponse
+from covsrv.auth.provider import OAuthProvider, ProviderUser, RepoAccess, TokenResponse
 
 
 class GitHubProvider(OAuthProvider):
@@ -76,8 +76,10 @@ class GitHubProvider(OAuthProvider):
             provider="github",
         )
 
-    async def can_view_repo(self, access_token: str, owner: str, repo: str) -> bool:
-        """GET /repos/{owner}/{repo} — 200 means visible, anything else means denied."""
+    async def can_view_repo(
+        self, access_token: str, owner: str, repo: str
+    ) -> RepoAccess:
+        """GET /repos/{owner}/{repo} — 200 means visible, 401 means token expired."""
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{self._config.api_base_url}/repos/{owner}/{repo}",
@@ -86,13 +88,23 @@ class GitHubProvider(OAuthProvider):
                     "Accept": "application/vnd.github+json",
                 },
             )
-        return resp.status_code == 200
+        if resp.status_code == 200:
+            return RepoAccess.ALLOWED
+        if resp.status_code == 401:
+            return RepoAccess.TOKEN_EXPIRED
+        return RepoAccess.DENIED
 
     async def is_repo_public(self, owner: str, repo: str) -> bool:
-        """Anonymous GET — 200 means public."""
+        """Anonymous GET — public only when the API confirms ``private`` is false."""
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{self._config.api_base_url}/repos/{owner}/{repo}",
                 headers={"Accept": "application/vnd.github+json"},
             )
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            return False
+        try:
+            data = resp.json()
+        except Exception:
+            return False
+        return data.get("private") is False

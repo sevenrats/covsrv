@@ -23,22 +23,29 @@ from typing import Awaitable, Callable
 
 from covsrv.auth.cache import AuthzCache
 from covsrv.auth.config import AuthConfig, ProviderConfig, load_auth_config
-from covsrv.auth.dependencies import AuthenticationRequired, require_view_permission
+from covsrv.auth.dependencies import (
+    AccessDenied,
+    AuthenticationRequired,
+    require_view_permission,
+)
 from covsrv.auth.provider import (
     OAuthProvider,
     ProviderUser,
+    RepoAccess,
     ResourceDescriptor,
     TokenResponse,
 )
 from covsrv.auth.routes import router as auth_router
 
 __all__ = [
+    "AccessDenied",
     "AuthConfig",
     "AuthenticationRequired",
     "AuthzCache",
     "OAuthProvider",
     "ProviderConfig",
     "ProviderUser",
+    "RepoAccess",
     "ResourceDescriptor",
     "TokenResponse",
     "auth_router",

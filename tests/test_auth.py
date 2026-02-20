@@ -19,6 +19,7 @@ from covsrv.auth.config import AuthConfig, ProviderConfig, load_auth_config
 from covsrv.auth.provider import (
     OAuthProvider,
     ProviderUser,
+    RepoAccess,
     ResourceDescriptor,
     TokenResponse,
 )
@@ -118,6 +119,19 @@ class TestSessionHelpers:
         )
         clear_provider_session(req, "github")
         assert get_provider_session(req, "github") is None
+        # Session should be fully destroyed when last provider is removed
+        assert req.session == {}
+
+    def test_clear_provider_session_keeps_other_providers(self):
+        req = _FakeRequest()
+        set_provider_session(
+            req, "github", access_token="gh", user_id="1", username="a"
+        )
+        set_provider_session(req, "gitea", access_token="gt", user_id="2", username="b")
+        clear_provider_session(req, "github")
+        assert get_provider_session(req, "github") is None
+        # Other provider should remain
+        assert get_provider_session(req, "gitea") is not None
 
     def test_clear_all_sessions(self):
         req = _FakeRequest()
@@ -130,6 +144,9 @@ class TestSessionHelpers:
         clear_all_sessions(req)
         assert get_provider_session(req, "github") is None
         assert get_provider_session(req, "gitea") is None
+        # Session must be fully destroyed (empty dict) so Starlette
+        # deletes the cookie rather than writing an empty one back.
+        assert req.session == {}
 
     def test_multiple_providers_independent(self):
         req = _FakeRequest()
@@ -235,13 +252,13 @@ class TestOAuthProviderCanView:
                 return ProviderUser(id="1", username="u", provider="stub")
 
             async def can_view_repo(self, access_token, owner, repo):
-                return owner == "allowed"
+                return RepoAccess.ALLOWED if owner == "allowed" else RepoAccess.DENIED
 
         p = StubProvider()
         rd_yes = ResourceDescriptor(provider="stub", owner="allowed", repo="r")
         rd_no = ResourceDescriptor(provider="stub", owner="denied", repo="r")
-        assert await p.can_view("tok", rd_yes) is True
-        assert await p.can_view("tok", rd_no) is False
+        assert await p.can_view("tok", rd_yes) is RepoAccess.ALLOWED
+        assert await p.can_view("tok", rd_no) is RepoAccess.DENIED
 
 
 # =====================================================================
@@ -267,8 +284,14 @@ class _FakeProvider(OAuthProvider):
     async def get_user(self, access_token: str) -> ProviderUser:
         return ProviderUser(id="42", username="fakeuser", provider="fakeprov")
 
-    async def can_view_repo(self, access_token: str, owner: str, repo: str) -> bool:
-        return repo != "private-repo"
+    async def can_view_repo(
+        self, access_token: str, owner: str, repo: str
+    ) -> RepoAccess:
+        if repo == "expired-repo":
+            return RepoAccess.TOKEN_EXPIRED
+        if repo == "private-repo":
+            return RepoAccess.DENIED
+        return RepoAccess.ALLOWED
 
     async def is_repo_public(self, owner: str, repo: str) -> bool:
         return repo == "public-repo"
@@ -391,10 +414,10 @@ class TestAuthCallbackRoute:
         assert state_match is not None
         state = state_match.group(1)
 
+        auth_client.cookies = cookies
         resp = await auth_client.get(
             f"/auth/fakeprov/callback?state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         assert resp.status_code == 400
 
@@ -424,10 +447,10 @@ class TestAuthCallbackRoute:
         state = state_match.group(1)
 
         # 2. Simulate callback
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         assert cb_resp.status_code == 307
         assert "/alice/proj/b/main" in cb_resp.headers["location"]
@@ -447,6 +470,115 @@ class TestAuthLogoutRoute:
             follow_redirects=False,
         )
         assert resp.status_code == 307
+
+    async def test_logout_clears_session(self, auth_client: AsyncClient):
+        """After login + logout, protected pages should require re-auth."""
+        import re
+
+        # 1. Login to get a session
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login?next=/",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        state_match = re.search(r"state=([^&]+)", login_resp.headers["location"])
+        assert state_match is not None
+
+        auth_client.cookies = cookies
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={state_match.group(1)}",
+            follow_redirects=False,
+        )
+        assert cb_resp.status_code == 307
+        session_cookies = cb_resp.cookies
+
+        # 2. Seed a private repo so the protected page triggers auth
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/proj",
+            provider_url="https://fake.example.com",
+        )
+
+        # 3. Verify session works (accessing protected page succeeds)
+        auth_client.cookies = session_cookies
+        dash_resp = await auth_client.get(
+            "/alice/proj/b/main",
+            follow_redirects=False,
+        )
+        assert dash_resp.status_code == 200
+
+        # 4. Logout
+        auth_client.cookies = session_cookies
+        logout_resp = await auth_client.get(
+            "/auth/fakeprov/logout?next=/",
+            follow_redirects=False,
+        )
+        assert logout_resp.status_code == 307
+        assert logout_resp.headers["location"] == "/"
+        cleared_cookies = logout_resp.cookies
+
+        # 5. Access the protected page again — should redirect to login
+        auth_client.cookies = cleared_cookies
+        post_logout = await auth_client.get(
+            "/alice/proj/b/main",
+            follow_redirects=False,
+        )
+        assert post_logout.status_code == 307
+        assert "/auth/fakeprov/login" in post_logout.headers["location"]
+
+    async def test_logout_all_clears_session(self, auth_client: AsyncClient):
+        """After login + logout-all, protected pages should require re-auth."""
+        import re
+
+        # 1. Login
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login?next=/",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        state_match = re.search(r"state=([^&]+)", login_resp.headers["location"])
+        assert state_match is not None
+
+        auth_client.cookies = cookies
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={state_match.group(1)}",
+            follow_redirects=False,
+        )
+        session_cookies = cb_resp.cookies
+
+        # 2. Seed a private repo
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/proj",
+            provider_url="https://fake.example.com",
+        )
+
+        # 3. Logout all
+        auth_client.cookies = session_cookies
+        logout_resp = await auth_client.get(
+            "/auth/logout?next=/",
+            follow_redirects=False,
+        )
+        assert logout_resp.status_code == 307
+        assert logout_resp.headers["location"] == "/"
+        cleared_cookies = logout_resp.cookies
+
+        # 4. Protected page should require login
+        auth_client.cookies = cleared_cookies
+        post_logout = await auth_client.get(
+            "/alice/proj/b/main",
+            follow_redirects=False,
+        )
+        assert post_logout.status_code == 307
+        assert "/auth/fakeprov/login" in post_logout.headers["location"]
 
 
 # =====================================================================
@@ -532,25 +664,67 @@ class TestRequireViewPermission:
         assert m is not None
         state = m.group(1)
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         # Merge cookies
         session_cookies = cb_resp.cookies
 
         # Now access a protected page
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/alice/proj/b/main",
-            cookies=session_cookies,
         )
         assert resp.status_code == 200
 
-    async def test_authenticated_denied_repo_returns_404(
+    async def test_protected_response_has_no_cache_headers(
         self, auth_client: AsyncClient
     ):
-        """Accessing a repo the provider denies returns 404."""
+        """Auth-protected responses must include Cache-Control: no-store
+        so browsers don't serve stale pages after logout."""
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/proj",
+            provider_url="https://fake.example.com",
+        )
+
+        # Login
+        import re
+
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        m = re.search(r"state=([^&]+)", login_resp.headers["location"])
+        assert m is not None
+
+        auth_client.cookies = cookies
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={m.group(1)}",
+            follow_redirects=False,
+        )
+        session_cookies = cb_resp.cookies
+
+        # Access dashboard
+        auth_client.cookies = session_cookies
+        resp = await auth_client.get(
+            "/alice/proj/b/main",
+        )
+        assert resp.status_code == 200
+        cc = resp.headers.get("cache-control", "")
+        assert "no-store" in cc, f"Expected no-store in Cache-Control, got: {cc!r}"
+
+    async def test_authenticated_denied_repo_returns_403(
+        self, auth_client: AsyncClient
+    ):
+        """Accessing a repo the provider denies returns a 403 access-denied page."""
         # Seed so the provider lookup maps this repo to fakeprov
         import main as app_module
         from tests.test_main import seed_report
@@ -575,20 +749,106 @@ class TestRequireViewPermission:
         assert m is not None
         state = m.group(1)
 
+        auth_client.cookies = cookies
         cb_resp = await auth_client.get(
             f"/auth/fakeprov/callback?code=good-code&state={state}",
             follow_redirects=False,
-            cookies=cookies,
         )
         session_cookies = cb_resp.cookies
 
         # "private-repo" is denied by _FakeProvider.can_view_repo
+        auth_client.cookies = session_cookies
         resp = await auth_client.get(
             "/alice/private-repo/b/main",
-            cookies=session_cookies,
             follow_redirects=False,
         )
+        assert resp.status_code == 403
+        assert "Access Denied" in resp.text
+        assert "alice/private-repo" in resp.text
+
+    async def test_authenticated_denied_api_returns_404(self, auth_client: AsyncClient):
+        """API/JSON request for a denied repo still gets a 404 (no leak)."""
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/private-repo",
+            provider_url="https://fake.example.com",
+        )
+
+        # Login first
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        import re
+
+        loc = login_resp.headers["location"]
+        m = re.search(r"state=([^&]+)", loc)
+        assert m is not None
+        state = m.group(1)
+
+        auth_client.cookies = cookies
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={state}",
+            follow_redirects=False,
+        )
+        session_cookies = cb_resp.cookies
+
+        # API request for denied repo → 404
+        auth_client.cookies = session_cookies
+        resp = await auth_client.get(
+            "/api/alice/private-repo/b/main/trend",
+            follow_redirects=False,
+            headers={"Accept": "application/json"},
+        )
         assert resp.status_code == 404
+
+    async def test_expired_token_redirects_to_login(self, auth_client: AsyncClient):
+        """When the provider reports token expired, user is sent back to OAuth."""
+        import main as app_module
+        from tests.test_main import seed_report
+
+        tmp_data_dir = Path(app_module.BASE_DIR)
+        # "expired-repo" triggers TOKEN_EXPIRED in _FakeProvider
+        await seed_report(
+            tmp_data_dir,
+            repo_full="alice/expired-repo",
+            provider_url="https://fake.example.com",
+        )
+
+        # Login first
+        login_resp = await auth_client.get(
+            "/auth/fakeprov/login",
+            follow_redirects=False,
+        )
+        cookies = login_resp.cookies
+        import re
+
+        loc = login_resp.headers["location"]
+        m = re.search(r"state=([^&]+)", loc)
+        assert m is not None
+        state = m.group(1)
+
+        auth_client.cookies = cookies
+        cb_resp = await auth_client.get(
+            f"/auth/fakeprov/callback?code=good-code&state={state}",
+            follow_redirects=False,
+        )
+        session_cookies = cb_resp.cookies
+
+        # Access repo whose token is "expired" → should redirect to login
+        auth_client.cookies = session_cookies
+        resp = await auth_client.get(
+            "/alice/expired-repo/b/main",
+            follow_redirects=False,
+        )
+        assert resp.status_code == 307
+        loc = resp.headers["location"]
+        assert "/auth/fakeprov/login" in loc
 
 
 class TestAuthDisabledPassthrough:
