@@ -26,7 +26,7 @@ jobs:
         run: uv run coverage run -m pytest
 
       - name: Coverage Report & Upload to covsrv
-        uses: https://git.crandall.codes/covsrv/actions-github@main
+        uses: sevenrats/covsrv-actions-github@main
         with:
           coverage-token: ${{ secrets.COVSRV_TOKEN }}
           reports-endpoint-url: ${{ secrets.COVSRV_REPORT_URL }}
