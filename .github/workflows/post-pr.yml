@@ -20,10 +20,10 @@ jobs:
       - uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv sync
+        run: uv pip install --system .
 
       - name: Run tests with coverage
-        run: uv run coverage run -m pytest
+        run: coverage run -m pytest
 
       - name: Coverage Report & Upload to covsrv
         uses: sevenrats/covsrv-actions-github@main
