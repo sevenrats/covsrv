@@ -1,0 +1,11 @@
+when:
+  - event: [pull_request]
+    branch: main
+
+steps:
+  - name: test
+    image: python:3.13-slim
+    commands:
+      - pip install uv
+      - uv sync
+      - uv run pytest

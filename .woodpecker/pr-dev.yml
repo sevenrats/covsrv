@@ -1,0 +1,22 @@
+when:
+  - event: [pull_request]
+    branch: develop
+
+steps:
+  - name: test
+    image: python:3.13-slim
+    commands:
+      - pip install uv
+      - uv sync
+      - uv run pytest
+
+  - name: docker-build
+    image: woodpeckerci/plugin-kaniko
+    settings:
+      repo: git.crandall.codes/covsrv/covsrv
+      registry: git.crandall.codes
+      no_push: true
+      username:
+        from_secret: WRITE_CC_REG_USER
+      password:
+        from_secret: WRITE_CC_REG_PAT

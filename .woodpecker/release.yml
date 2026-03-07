@@ -1,0 +1,29 @@
+when:
+  - event: [tag]
+
+steps:
+  - name: test
+    image: python:3.13-slim
+    commands:
+      - pip install uv
+      - uv sync
+      - uv run pytest
+
+  - name: gitea-release
+    image: plugins/gitea-release
+    settings:
+      api_key:
+        from_secret: GITEA_TOKEN
+      base_url: https://git.crandall.codes
+      title: ${CI_COMMIT_TAG}
+
+  - name: docker-push
+    image: woodpeckerci/plugin-kaniko
+    settings:
+      repo: git.crandall.codes/covsrv/covsrv
+      registry: git.crandall.codes
+      tags: "${CI_COMMIT_TAG},latest"
+      username:
+        from_secret: WRITE_CC_REG_USER
+      password:
+        from_secret: WRITE_CC_REG_PAT

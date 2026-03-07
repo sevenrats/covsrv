@@ -1,0 +1,32 @@
+when:
+  - event: [push]
+    branch: develop
+
+steps:
+  - name: test
+    image: python:3.13-slim
+    commands:
+      - pip install uv
+      - uv pip compile pyproject.toml -o requirements.txt
+      - pip install -r requirements.txt
+      - coverage run -m pytest
+
+  - name: coverage
+    image: git.crandall.codes/covsrv/actions-woodpecker:latest
+    environment:
+      COVSRV_TOKEN:
+        from_secret: covsrv_token
+      COVSRV_ENDPOINT:
+        from_secret: covsrv_endpoint
+      COVSRV_FORGE: gitea
+
+  - name: docker-push
+    image: woodpeckerci/plugin-kaniko
+    settings:
+      repo: git.crandall.codes/covsrv/covsrv
+      registry: git.crandall.codes
+      tags: dev
+      username:
+        from_secret: WRITE_CC_REG_USER
+      password:
+        from_secret: WRITE_CC_REG_PAT
