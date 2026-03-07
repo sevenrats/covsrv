@@ -74,10 +74,10 @@ class TestInitDb:
 class TestUpsertRepoSeen:
     async def test_insert_new(self, initialized_db):
         async with db.session() as sess:
-            await db.upsert_repo_seen(sess, "alice/foo", 1000)
+            await db.upsert_repo_seen(sess, "prov", "alice/foo", 1000)
 
         async with db.session() as sess:
-            result = await sess.execute(select(Repo).where(Repo.repo == "alice/foo"))
+            result = await sess.execute(select(Repo).where(Repo.provider_id == "prov", Repo.repo == "alice/foo"))
             row = result.scalars().first()
             assert row is not None
             assert row.first_seen_ts == 1000
@@ -85,12 +85,12 @@ class TestUpsertRepoSeen:
 
     async def test_upsert_updates_last_seen(self, initialized_db):
         async with db.session() as sess:
-            await db.upsert_repo_seen(sess, "alice/foo", 1000)
+            await db.upsert_repo_seen(sess, "prov", "alice/foo", 1000)
         async with db.session() as sess:
-            await db.upsert_repo_seen(sess, "alice/foo", 2000)
+            await db.upsert_repo_seen(sess, "prov", "alice/foo", 2000)
 
         async with db.session() as sess:
-            result = await sess.execute(select(Repo).where(Repo.repo == "alice/foo"))
+            result = await sess.execute(select(Repo).where(Repo.provider_id == "prov", Repo.repo == "alice/foo"))
             row = result.scalars().first()
             assert row is not None
             assert row.first_seen_ts == 1000
@@ -104,13 +104,14 @@ class TestUpsertRepoSeen:
 
 class TestLatestReportForRepoHash:
     async def test_returns_none_when_empty(self, initialized_db):
-        result = await db.latest_report_for_repo_hash("owner/repo", "abc1234")
+        result = await db.latest_report_for_repo_hash("prov", "owner/repo", "abc1234")
         assert result is None
 
     async def test_returns_row(self, initialized_db):
         async with db.session() as sess:
             sess.add(
                 Report(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="abc1234567",
@@ -120,7 +121,7 @@ class TestLatestReportForRepoHash:
                 )
             )
 
-        row = await db.latest_report_for_repo_hash("owner/repo", "abc1234567")
+        row = await db.latest_report_for_repo_hash("prov", "owner/repo", "abc1234567")
         assert row is not None
         assert row["overall_percent"] == 85.5
         assert row["git_hash"] == "abc1234567"
@@ -130,6 +131,7 @@ class TestLatestReportForRepoHash:
         async with db.session() as sess:
             sess.add(
                 Report(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="def7654321",
@@ -140,7 +142,7 @@ class TestLatestReportForRepoHash:
                 )
             )
 
-        row = await db.latest_report_for_repo_hash("owner/repo", "def7654321")
+        row = await db.latest_report_for_repo_hash("prov", "owner/repo", "def7654321")
         assert row is not None
         assert row["provider_url"] == "https://gitlab.com"
 
@@ -148,6 +150,7 @@ class TestLatestReportForRepoHash:
         async with db.session() as sess:
             sess.add(
                 Report(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="abc1234567",
@@ -157,7 +160,24 @@ class TestLatestReportForRepoHash:
                 )
             )
 
-        result = await db.latest_report_for_repo_hash("owner/repo", "deadbeef123")
+        result = await db.latest_report_for_repo_hash("prov", "owner/repo", "deadbeef123")
+        assert result is None
+
+    async def test_different_provider_not_found(self, initialized_db):
+        async with db.session() as sess:
+            sess.add(
+                Report(
+                    provider_id="prov1",
+                    repo="owner/repo",
+                    branch_name="main",
+                    git_hash="abc1234567",
+                    received_ts=1000,
+                    overall_percent=85.5,
+                    report_dir="/tmp/r",
+                )
+            )
+
+        result = await db.latest_report_for_repo_hash("prov2", "owner/repo", "abc1234567")
         assert result is None
 
 
@@ -168,13 +188,14 @@ class TestLatestReportForRepoHash:
 
 class TestLatestBranchHeadHash:
     async def test_returns_none_when_empty(self, initialized_db):
-        result = await db.latest_branch_head_hash("owner/repo", "main")
+        result = await db.latest_branch_head_hash("prov", "owner/repo", "main")
         assert result is None
 
     async def test_returns_hash(self, initialized_db):
         async with db.session() as sess:
             sess.add(
                 BranchHead(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     current_hash="abc1234567",
@@ -182,7 +203,7 @@ class TestLatestBranchHeadHash:
                 )
             )
 
-        result = await db.latest_branch_head_hash("owner/repo", "main")
+        result = await db.latest_branch_head_hash("prov", "owner/repo", "main")
         assert result == "abc1234567"
 
 
@@ -193,13 +214,14 @@ class TestLatestBranchHeadHash:
 
 class TestBranchEventsFor:
     async def test_empty(self, initialized_db):
-        result = await db.branch_events_for("owner/repo", "main", 10)
+        result = await db.branch_events_for("prov", "owner/repo", "main", 10)
         assert result == []
 
     async def test_returns_events_ordered(self, initialized_db):
         async with db.session() as sess:
             sess.add(
                 BranchEvent(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="aaa1234567",
@@ -208,6 +230,7 @@ class TestBranchEventsFor:
             )
             sess.add(
                 BranchEvent(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="bbb1234567",
@@ -215,7 +238,7 @@ class TestBranchEventsFor:
                 )
             )
 
-        events = await db.branch_events_for("owner/repo", "main", 10)
+        events = await db.branch_events_for("prov", "owner/repo", "main", 10)
         assert len(events) == 2
         assert events[0]["git_hash"] == "aaa1234567"
         assert events[1]["git_hash"] == "bbb1234567"
@@ -225,6 +248,7 @@ class TestBranchEventsFor:
             for i in range(5):
                 sess.add(
                     BranchEvent(
+                        provider_id="prov",
                         repo="owner/repo",
                         branch_name="main",
                         git_hash=f"hash{i:010d}",
@@ -232,7 +256,7 @@ class TestBranchEventsFor:
                     )
                 )
 
-        events = await db.branch_events_for("owner/repo", "main", 3)
+        events = await db.branch_events_for("prov", "owner/repo", "main", 3)
         assert len(events) == 3
 
 
@@ -243,13 +267,14 @@ class TestBranchEventsFor:
 
 class TestReportsTrendForRepoHash:
     async def test_empty(self, initialized_db):
-        result = await db.reports_trend_for_repo_hash("owner/repo", "abc1234567", 10)
+        result = await db.reports_trend_for_repo_hash("prov", "owner/repo", "abc1234567", 10)
         assert result == []
 
     async def test_returns_matching_records(self, initialized_db):
         async with db.session() as sess:
             sess.add(
                 Report(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="abc1234567",
@@ -259,7 +284,7 @@ class TestReportsTrendForRepoHash:
                 )
             )
 
-        result = await db.reports_trend_for_repo_hash("owner/repo", "abc1234567", 10)
+        result = await db.reports_trend_for_repo_hash("prov", "owner/repo", "abc1234567", 10)
         assert len(result) == 1
         assert result[0]["overall_percent"] == 85.5
 
@@ -271,13 +296,14 @@ class TestReportsTrendForRepoHash:
 
 class TestReportPercentForHashes:
     async def test_empty_pairs(self, initialized_db):
-        result = await db.report_percent_for_hashes("owner/repo", [])
+        result = await db.report_percent_for_hashes("prov", "owner/repo", [])
         assert result == []
 
     async def test_resolves_percent(self, initialized_db):
         async with db.session() as sess:
             sess.add(
                 Report(
+                    provider_id="prov",
                     repo="owner/repo",
                     branch_name="main",
                     git_hash="abc1234567",
@@ -288,7 +314,7 @@ class TestReportPercentForHashes:
             )
 
         result = await db.report_percent_for_hashes(
-            "owner/repo", [("abc1234567", 1000)]
+            "prov", "owner/repo", [("abc1234567", 1000)]
         )
         assert len(result) == 1
         assert result[0]["overall_percent"] == 85.5
@@ -296,7 +322,7 @@ class TestReportPercentForHashes:
 
     async def test_missing_hash_returns_zero(self, initialized_db):
         result = await db.report_percent_for_hashes(
-            "owner/repo", [("nonexistent1", 1000)]
+            "prov", "owner/repo", [("nonexistent1", 1000)]
         )
         assert len(result) == 1
         assert result[0]["overall_percent"] == 0.0
@@ -310,11 +336,11 @@ class TestReportPercentForHashes:
 class TestSession:
     async def test_commits_on_success(self, initialized_db):
         async with db.session() as sess:
-            sess.add(Repo(repo="test/repo", first_seen_ts=100, last_seen_ts=100))
+            sess.add(Repo(provider_id="prov", repo="test/repo", first_seen_ts=100, last_seen_ts=100))
 
         # Read back in a separate session
         async with db.session() as sess:
-            result = await sess.execute(select(Repo).where(Repo.repo == "test/repo"))
+            result = await sess.execute(select(Repo).where(Repo.provider_id == "prov", Repo.repo == "test/repo"))
             row = result.scalars().first()
             assert row is not None
 
@@ -322,14 +348,14 @@ class TestSession:
         with pytest.raises(ValueError):
             async with db.session() as sess:
                 sess.add(
-                    Repo(repo="rollback/repo", first_seen_ts=100, last_seen_ts=100)
+                    Repo(provider_id="prov", repo="rollback/repo", first_seen_ts=100, last_seen_ts=100)
                 )
                 raise ValueError("oops")
 
         # Data should NOT be committed
         async with db.session() as sess:
             result = await sess.execute(
-                select(Repo).where(Repo.repo == "rollback/repo")
+                select(Repo).where(Repo.provider_id == "prov", Repo.repo == "rollback/repo")
             )
             row = result.scalars().first()
             assert row is None

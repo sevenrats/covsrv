@@ -14,7 +14,12 @@
 # any provider, while a repo-level key only works for that one repo.
 #
 # Provider names must be unique and URL-safe (letters, digits, - and _).
-# They are used in OAuth callback URLs and in the reports API.
+# They are used in URL path slugs (e.g. /github/owner/repo/b/main).
+#
+# Each provider may also declare an optional stable "id" used as the
+# database key.  When omitted it defaults to the TOML key.  If you later
+# rename the TOML key the URL slugs change automatically while existing
+# database records remain valid.
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +56,7 @@ auth_cache_ttl = 60
 # -- Example: GitHub --------------------------------------------------------
 
 [providers.github]
+id        = "github"
 type      = "github"
 url       = "https://github.com"
 report_key = "change-me-github-provider-key"
@@ -63,6 +69,7 @@ report_key = "change-me-github-provider-key"
 # -- Example: Self-hosted Gitea ---------------------------------------------
 
 # [providers.my-gitea]
+# id            = "gitea1"
 # type          = "gitea"
 # url           = "https://gitea.example.com"
 # report_key    = "change-me-gitea-provider-key"

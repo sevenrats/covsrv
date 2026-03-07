@@ -123,7 +123,7 @@ async def setup_auth(config_manager: "ConfigManager | None" = None) -> None:
             from covsrv.auth.github import GitHubProvider
 
             providers[name] = GitHubProvider(pconfig)
-        elif ptype == "gitea":
+        elif ptype in ("gitea", "forgejo"):
             from covsrv.auth.gitea import GiteaProvider
 
             providers[name] = GiteaProvider(pconfig)
@@ -139,7 +139,7 @@ async def setup_auth(config_manager: "ConfigManager | None" = None) -> None:
                 from covsrv.auth.github import GitHubProvider
 
                 providers[name] = GitHubProvider(pconfig)
-            elif entry.type == "gitea":
+            elif entry.type in ("gitea", "forgejo"):
                 from covsrv.auth.gitea import GiteaProvider
 
                 providers[name] = GiteaProvider(pconfig)
@@ -158,45 +158,55 @@ def _make_repo_provider_lookup(
 ) -> Callable[[str], Awaitable[str | None]]:
     """Return an async callable that maps ``'owner/repo'`` → provider name.
 
-    Checks the ``provider_name`` column first (populated by config-driven
-    ingest).  Falls back to the ``provider_url`` → name mapping for
-    legacy reports.  As a last resort, when there is exactly one OAuth
-    provider configured, returns it unconditionally — this covers legacy
-    reports whose ``provider_url`` is a stale default.
+    With the provider-scoped routes the provider is normally known from
+    the URL.  This lookup is a fallback for legacy routes or edge cases.
+
+    Checks the ``provider_id`` / ``provider_name`` columns first, then
+    falls back to the ``provider_url`` → name mapping, and finally uses
+    a single-provider heuristic.
     """
 
     # Build a *full* URL→name map from the ConfigManager (if available)
     # that covers all providers, not just OAuth-enabled ones.
     all_url_to_name: dict[str, str] = {}
+    id_to_name: dict[str, str] = {}
     if auth_state.config_manager is not None:
         for name, entry in auth_state.config_manager.providers.items():
             all_url_to_name[entry.url.rstrip("/")] = name
+            id_to_name[entry.id] = name
 
     async def _lookup(repo_full: str) -> str | None:
-        from covsrv import db as _db
+        # Try each configured provider's id to see if this repo exists
+        # under it.  This is a quick scan since there are typically few
+        # providers.
+        if id_to_name:
+            from covsrv import db as _db
 
-        # Fast path: provider_name stored directly
-        pname = await _db.provider_name_for_repo(repo_full)
-        if pname and pname in auth_state.providers:
-            return pname
+            for pid, pname in id_to_name.items():
+                pn = await _db.provider_name_for_repo(pid, repo_full)
+                if pn is not None and pname in auth_state.providers:
+                    return pname
 
-        # Fallback: resolve via provider_url
-        provider_url = await _db.provider_url_for_repo(repo_full)
-        if provider_url is not None:
-            purl = provider_url.rstrip("/")
-            # Try OAuth-enabled providers first
-            for url, name in config.url_to_provider.items():
-                if purl == url.rstrip("/") or purl.startswith(url.rstrip("/") + "/"):
-                    return name
-            # Try all configured providers (including non-OAuth)
-            for url, name in all_url_to_name.items():
-                if purl == url or purl.startswith(url + "/"):
-                    if name in auth_state.providers:
-                        return name
+        # Fallback: resolve via provider_url for legacy data
+        if all_url_to_name:
+            from covsrv import db as _db
+
+            # Check every provider_id we know about
+            for pid, pname in id_to_name.items():
+                provider_url = await _db.provider_url_for_repo(pid, repo_full)
+                if provider_url is not None:
+                    purl = provider_url.rstrip("/")
+                    for url, name in config.url_to_provider.items():
+                        if purl == url.rstrip("/") or purl.startswith(
+                            url.rstrip("/") + "/"
+                        ):
+                            return name
+                    for url, name in all_url_to_name.items():
+                        if purl == url or purl.startswith(url + "/"):
+                            if name in auth_state.providers:
+                                return name
 
         # Last resort: if there is exactly one OAuth provider, use it.
-        # This covers legacy reports whose provider_url is a stale default
-        # (e.g. "https://github.com" when the repo actually lives on Gitea).
         if len(config.providers) == 1:
             return next(iter(config.providers))
         return None
@@ -205,11 +215,21 @@ def _make_repo_provider_lookup(
 
 
 def _make_repo_provider_url_lookup() -> Callable[[str], Awaitable[str | None]]:
-    """Return an async callable that maps ``'owner/repo'`` → raw provider URL."""
+    """Return an async callable that maps ``'owner/repo'`` → raw provider URL.
+
+    Uses the first configured provider's id as a best-effort lookup.
+    """
 
     async def _lookup(repo_full: str) -> str | None:
         from covsrv import db as _db
 
-        return await _db.provider_url_for_repo(repo_full)
+        # Try each configured provider
+        if auth_state.config_manager is not None:
+            for _name, entry in auth_state.config_manager.providers.items():
+                url = await _db.provider_url_for_repo(entry.id, repo_full)
+                if url is not None:
+                    return url
+        # Legacy: try with empty provider_id
+        return await _db.provider_url_for_repo("", repo_full)
 
     return _lookup

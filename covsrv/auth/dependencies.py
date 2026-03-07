@@ -71,7 +71,19 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
         raise HTTPException(status_code=400, detail="Missing owner or repo in path")
 
     # --- resolve provider ---
-    provider_name = await _resolve_provider(owner, name)
+    # The {provider} path parameter is the TOML key / URL slug (e.g. "gh"),
+    # which may differ from the auth provider name (e.g. "fakeprov").
+    # Try a direct match first; if that fails, fall back to the DB-based
+    # heuristic which maps via provider_url / provider_name columns.
+    provider_name: str | None = request.path_params.get("provider")
+    if provider_name and provider_name not in auth_state.providers:
+        # URL slug doesn't correspond to a known auth provider — resolve
+        # via the DB lookup (maps repo → provider_url → auth provider).
+        resolved = await _resolve_provider(owner, name)
+        if resolved is not None:
+            provider_name = resolved
+    if not provider_name:
+        provider_name = await _resolve_provider(owner, name)
     provider = auth_state.providers.get(provider_name) if provider_name else None
 
     # --- public repo check (cached) ---
@@ -175,8 +187,8 @@ async def _resolve_provider(owner: str, name: str) -> str | None:
     """Determine which auth provider handles ``owner/name``.
 
     Returns the provider name if one is configured for this repo's
-    ``provider_url``, or ``None`` if the repo is unknown or its
-    provider isn't configured.
+    ``provider_url`` or ``provider_id``, or ``None`` if the repo is
+    unknown or its provider isn't configured.
     """
     from covsrv.auth import auth_state
 

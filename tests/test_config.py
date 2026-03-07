@@ -21,6 +21,7 @@ auth_enabled = true
 auth_cache_ttl = 120
 
 [providers.my-gitea]
+id = "gitea1"
 type = "gitea"
 url = "https://gitea.example.com"
 report_key = "gitea-prov-key"
@@ -34,6 +35,7 @@ report_key = "owner-key"
 report_key = "repo-key"
 
 [providers.gh]
+id = "gh"
 type = "github"
 url = "https://github.com"
 report_key = "gh-key"
@@ -41,11 +43,13 @@ report_key = "gh-key"
 
 MULTI_GITHUB_TOML = """\
 [providers.github-public]
+id = "ghpub"
 type = "github"
 url = "https://github.com"
 report_key = "pub-key"
 
 [providers.github-enterprise]
+id = "ghent"
 type = "github"
 url = "https://github.corp.example.com"
 report_key = "ent-key"
@@ -73,6 +77,8 @@ class TestFromStr:
         cfg = ConfigManager.from_str(MINIMAL_TOML)
         gt = cfg.get_provider("my-gitea")
         assert gt is not None
+        assert gt.id == "gitea1"
+        assert gt.name == "my-gitea"
         assert gt.type == "gitea"
         assert gt.url == "https://gitea.example.com"
         assert gt.report_key == "gitea-prov-key"
@@ -104,7 +110,7 @@ class TestFromStr:
 
     def test_url_trailing_slash_stripped(self):
         cfg = ConfigManager.from_str(
-            '[providers.x]\ntype = "gitea"\nurl = "https://example.com/"'
+            '[providers.x]\nid = "x"\ntype = "gitea"\nurl = "https://example.com/"'
         )
         x = cfg.get_provider("x")
         assert x is not None
@@ -135,6 +141,36 @@ class TestFromStr:
                 '[providers."bad name!"]\ntype = "github"\nurl = "http://x"'
             )
 
+    def test_id_defaults_to_name(self):
+        cfg = ConfigManager.from_str(
+            '[providers.simple]\ntype = "github"\nurl = "http://x"'
+        )
+        p = cfg.get_provider("simple")
+        assert p is not None
+        assert p.id == "simple"
+
+    def test_explicit_id(self):
+        cfg = ConfigManager.from_str(
+            '[providers.my-gh]\nid = "gh01"\ntype = "github"\nurl = "http://x"'
+        )
+        p = cfg.get_provider("my-gh")
+        assert p is not None
+        assert p.id == "gh01"
+        assert p.name == "my-gh"
+
+    def test_duplicate_id_raises(self):
+        with pytest.raises(ValueError, match="Duplicate provider id"):
+            ConfigManager.from_str(
+                '[providers.a]\nid = "same"\ntype = "github"\nurl = "http://a"\n'
+                '[providers.b]\nid = "same"\ntype = "github"\nurl = "http://b"'
+            )
+
+    def test_invalid_id_raises(self):
+        with pytest.raises(ValueError, match="id.*invalid"):
+            ConfigManager.from_str(
+                '[providers.ok]\nid = "bad id!"\ntype = "github"\nurl = "http://x"'
+            )
+
 
 class TestDefault:
     def test_empty(self):
@@ -151,6 +187,30 @@ class TestProviderUrl:
     def test_unknown_provider(self):
         cfg = ConfigManager.from_str(MINIMAL_TOML)
         assert cfg.provider_url("nope") is None
+
+
+class TestProviderIdLookups:
+    def test_id_for_name(self):
+        cfg = ConfigManager.from_str(MINIMAL_TOML)
+        assert cfg.provider_id_for_name("my-gitea") == "gitea1"
+        assert cfg.provider_id_for_name("gh") == "gh"
+
+    def test_name_for_id(self):
+        cfg = ConfigManager.from_str(MINIMAL_TOML)
+        assert cfg.provider_name_for_id("gitea1") == "my-gitea"
+        assert cfg.provider_name_for_id("gh") == "gh"
+
+    def test_get_provider_by_id(self):
+        cfg = ConfigManager.from_str(MINIMAL_TOML)
+        entry = cfg.get_provider_by_id("gitea1")
+        assert entry is not None
+        assert entry.name == "my-gitea"
+
+    def test_unknown_returns_none(self):
+        cfg = ConfigManager.from_str(MINIMAL_TOML)
+        assert cfg.provider_id_for_name("nope") is None
+        assert cfg.provider_name_for_id("nope") is None
+        assert cfg.get_provider_by_id("nope") is None
 
 
 # =====================================================================
@@ -263,7 +323,7 @@ class TestToAuthConfig:
 
     def test_unknown_type_raises(self):
         cfg = ConfigManager.from_str(
-            '[providers.x]\ntype = "gitlab"\nurl = "http://x"\nclient_id = "a"\nclient_secret = "b"'
+            '[providers.x]\nid = "x"\ntype = "gitlab"\nurl = "http://x"\nclient_id = "a"\nclient_secret = "b"'
         )
         entry = cfg.get_provider("x")
         assert entry is not None

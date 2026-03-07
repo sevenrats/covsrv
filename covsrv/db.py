@@ -104,10 +104,10 @@ async def dispose() -> None:
 # ------------------------------------------------------------------
 
 
-async def upsert_repo_seen(sess: AsyncSession, repo: str, ts: int) -> None:
-    stmt = sqlite_insert(Repo).values(repo=repo, first_seen_ts=ts, last_seen_ts=ts)
+async def upsert_repo_seen(sess: AsyncSession, provider_id: str, repo: str, ts: int) -> None:
+    stmt = sqlite_insert(Repo).values(provider_id=provider_id, repo=repo, first_seen_ts=ts, last_seen_ts=ts)
     stmt = stmt.on_conflict_do_update(
-        index_elements=[Repo.repo],
+        index_elements=[Repo.provider_id, Repo.repo],
         set_={"last_seen_ts": stmt.excluded.last_seen_ts},
     )
     await sess.execute(stmt)
@@ -115,16 +115,17 @@ async def upsert_repo_seen(sess: AsyncSession, repo: str, ts: int) -> None:
 
 async def upsert_branch_head(
     sess: AsyncSession,
+    provider_id: str,
     repo: str,
     branch_name: str,
     git_hash: str,
     ts: int,
 ) -> None:
     stmt = sqlite_insert(BranchHead).values(
-        repo=repo, branch_name=branch_name, current_hash=git_hash, updated_ts=ts
+        provider_id=provider_id, repo=repo, branch_name=branch_name, current_hash=git_hash, updated_ts=ts
     )
     stmt = stmt.on_conflict_do_update(
-        index_elements=[BranchHead.repo, BranchHead.branch_name],
+        index_elements=[BranchHead.provider_id, BranchHead.repo, BranchHead.branch_name],
         set_={
             "current_hash": stmt.excluded.current_hash,
             "updated_ts": stmt.excluded.updated_ts,
@@ -139,12 +140,16 @@ async def upsert_branch_head(
 
 
 async def latest_report_for_repo_hash(
-    repo: str, git_hash: str
+    provider_id: str, repo: str, git_hash: str
 ) -> dict[str, Any] | None:
     async with session() as sess:
         stmt = (
             select(Report)
-            .where(Report.repo == repo, Report.git_hash == git_hash)
+            .where(
+                Report.provider_id == provider_id,
+                Report.repo == repo,
+                Report.git_hash == git_hash,
+            )
             .limit(1)
         )
         result = await sess.execute(stmt)
@@ -159,16 +164,21 @@ async def latest_report_for_repo_hash(
             "received_ts": row.received_ts,
             "overall_percent": row.overall_percent,
             "report_dir": row.report_dir,
+            "provider_id": row.provider_id,
             "provider_url": row.provider_url,
             "provider_name": row.provider_name,
         }
 
 
-async def latest_branch_head_hash(repo: str, branch_name: str) -> str | None:
+async def latest_branch_head_hash(provider_id: str, repo: str, branch_name: str) -> str | None:
     async with session() as sess:
         stmt = (
             select(BranchHead.current_hash)
-            .where(BranchHead.repo == repo, BranchHead.branch_name == branch_name)
+            .where(
+                BranchHead.provider_id == provider_id,
+                BranchHead.repo == repo,
+                BranchHead.branch_name == branch_name,
+            )
             .limit(1)
         )
         result = await sess.execute(stmt)
@@ -177,12 +187,13 @@ async def latest_branch_head_hash(repo: str, branch_name: str) -> str | None:
 
 
 async def branch_events_for(
-    repo: str, branch_name: str, limit: int
+    provider_id: str, repo: str, branch_name: str, limit: int
 ) -> list[dict[str, Any]]:
     async with session() as sess:
         stmt = (
             select(BranchEvent.id, BranchEvent.git_hash, BranchEvent.updated_ts)
             .where(
+                BranchEvent.provider_id == provider_id,
                 BranchEvent.repo == repo,
                 BranchEvent.branch_name == branch_name,
             )
@@ -194,12 +205,16 @@ async def branch_events_for(
 
 
 async def reports_trend_for_repo_hash(
-    repo: str, git_hash: str, limit: int
+    provider_id: str, repo: str, git_hash: str, limit: int
 ) -> list[dict[str, Any]]:
     async with session() as sess:
         stmt = (
             select(Report.git_hash, Report.received_ts, Report.overall_percent)
-            .where(Report.repo == repo, Report.git_hash == git_hash)
+            .where(
+                Report.provider_id == provider_id,
+                Report.repo == repo,
+                Report.git_hash == git_hash,
+            )
             .order_by(Report.received_ts.asc(), Report.id.asc())
             .limit(limit)
         )
@@ -207,12 +222,12 @@ async def reports_trend_for_repo_hash(
         return [dict(r._mapping) for r in result.all()]
 
 
-async def provider_url_for_repo(repo: str) -> str | None:
+async def provider_url_for_repo(provider_id: str, repo: str) -> str | None:
     """Return the ``provider_url`` from the most recent report for *repo*."""
     async with session() as sess:
         stmt = (
             select(Report.provider_url)
-            .where(Report.repo == repo)
+            .where(Report.provider_id == provider_id, Report.repo == repo)
             .order_by(Report.received_ts.desc())
             .limit(1)
         )
@@ -221,12 +236,12 @@ async def provider_url_for_repo(repo: str) -> str | None:
         return None if row is None else str(row[0])
 
 
-async def provider_name_for_repo(repo: str) -> str | None:
+async def provider_name_for_repo(provider_id: str, repo: str) -> str | None:
     """Return the ``provider_name`` from the most recent report for *repo*."""
     async with session() as sess:
         stmt = (
             select(Report.provider_name)
-            .where(Report.repo == repo)
+            .where(Report.provider_id == provider_id, Report.repo == repo)
             .order_by(Report.received_ts.desc())
             .limit(1)
         )
@@ -238,7 +253,7 @@ async def provider_name_for_repo(repo: str) -> str | None:
 
 
 async def report_percent_for_hashes(
-    repo: str, hash_ts_pairs: list[tuple[str, int]]
+    provider_id: str, repo: str, hash_ts_pairs: list[tuple[str, int]]
 ) -> list[dict[str, Any]]:
     """Resolve overall_percent for a list of (git_hash, updated_ts) pairs."""
     points: list[dict[str, Any]] = []
@@ -246,7 +261,11 @@ async def report_percent_for_hashes(
         for git_hash, updated_ts in hash_ts_pairs:
             stmt = (
                 select(Report.overall_percent)
-                .where(Report.repo == repo, Report.git_hash == git_hash)
+                .where(
+                    Report.provider_id == provider_id,
+                    Report.repo == repo,
+                    Report.git_hash == git_hash,
+                )
                 .limit(1)
             )
             result = await sess.execute(stmt)

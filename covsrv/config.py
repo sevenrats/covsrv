@@ -48,11 +48,15 @@ class OwnerConfig:
 class ProviderEntry:
     """Configuration for a single provider instance.
 
-    ``name`` is the user-chosen unique identifier (e.g. ``"my-gitea"``).
+    ``name`` is the TOML key (e.g. ``"my-gitea"``), used in URL path
+    slugs.  ``id`` is a **stable** identifier stored in the database —
+    it defaults to *name* but can be set explicitly so that renaming
+    the TOML key changes only URLs without breaking DB references.
     ``type`` selects the backend implementation (``"github"`` or ``"gitea"``).
     """
 
-    name: str
+    id: str  # stable DB identifier (defaults to name)
+    name: str  # TOML key, used in URL slugs
     type: str  # "github" | "gitea"
     url: str
     report_key: str | None = None
@@ -99,6 +103,15 @@ class ConfigManager:
     ) -> None:
         self._global = global_config
         self._providers = providers
+
+        # Build reverse-lookup maps for provider id ↔ name.
+        self._id_to_name: dict[str, str] = {}
+        self._name_to_id: dict[str, str] = {}
+        self._id_to_provider: dict[str, ProviderEntry] = {}
+        for name, entry in providers.items():
+            self._id_to_name[entry.id] = name
+            self._name_to_id[name] = entry.id
+            self._id_to_provider[entry.id] = entry
 
     # -------------------------------------------------------------- factories
 
@@ -168,7 +181,16 @@ class ConfigManager:
                         report_key=rdata.get("report_key") or None,
                     )
 
+            # Stable provider id (defaults to TOML key).
+            pid = str(pdata.get("id", name))
+            if not _NAME_RE.match(pid):
+                raise ValueError(
+                    f"Provider id {pid!r} is invalid; "
+                    "use only letters, digits, hyphens, and underscores"
+                )
+
             providers[name] = ProviderEntry(
+                id=pid,
                 name=name,
                 type=ptype,
                 url=url.rstrip("/"),
@@ -178,6 +200,16 @@ class ConfigManager:
                 owners=owners,
                 repos=repos,
             )
+
+        # Validate id uniqueness across providers.
+        seen_ids: dict[str, str] = {}  # id → name
+        for pname, entry in providers.items():
+            if entry.id in seen_ids:
+                raise ValueError(
+                    f"Duplicate provider id {entry.id!r}: used by both "
+                    f"{seen_ids[entry.id]!r} and {pname!r}"
+                )
+            seen_ids[entry.id] = pname
 
         return cls(global_config, providers)
 
@@ -198,6 +230,18 @@ class ConfigManager:
 
     def get_provider(self, name: str) -> ProviderEntry | None:
         return self._providers.get(name)
+
+    def get_provider_by_id(self, pid: str) -> ProviderEntry | None:
+        """Look up a provider by its stable *id*."""
+        return self._id_to_provider.get(pid)
+
+    def provider_id_for_name(self, name: str) -> str | None:
+        """Return the stable id for the provider with TOML key *name*."""
+        return self._name_to_id.get(name)
+
+    def provider_name_for_id(self, pid: str) -> str | None:
+        """Return the TOML key (name) for the provider with stable *id*."""
+        return self._id_to_name.get(pid)
 
     def provider_url(self, name: str) -> str | None:
         """Return the base URL for *name*, or ``None`` if unknown."""
@@ -285,7 +329,7 @@ class ConfigManager:
                 scopes=["read:org", "repo"],
             )
 
-        if entry.type == "gitea":
+        if entry.type in ("gitea", "forgejo"):
             return ProviderConfig(
                 name=entry.name,
                 client_id=entry.client_id or "",

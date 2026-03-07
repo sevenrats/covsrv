@@ -16,6 +16,9 @@ class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider_id: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     repo: Mapped[str] = mapped_column(Text, nullable=False)
     branch_name: Mapped[str] = mapped_column(Text, nullable=False)
     git_hash: Mapped[str] = mapped_column(Text, nullable=False)
@@ -30,41 +33,46 @@ class Report(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("repo", "git_hash", name="uq_reports_repo_hash"),
-        Index("idx_reports_repo_branch_ts", "repo", "branch_name", "received_ts"),
-        Index("idx_reports_repo_hash_ts", "repo", "git_hash", "received_ts"),
+        UniqueConstraint("provider_id", "repo", "git_hash", name="uq_reports_provider_repo_hash"),
+        Index("idx_reports_prov_repo_branch_ts", "provider_id", "repo", "branch_name", "received_ts"),
+        Index("idx_reports_prov_repo_hash_ts", "provider_id", "repo", "git_hash", "received_ts"),
     )
 
 
 class BranchHead(Base):
     __tablename__ = "branch_heads"
 
+    provider_id: Mapped[str] = mapped_column(Text, primary_key=True, server_default=text("''"))
     repo: Mapped[str] = mapped_column(Text, primary_key=True)
     branch_name: Mapped[str] = mapped_column(Text, primary_key=True)
     current_hash: Mapped[str] = mapped_column(Text, nullable=False)
     updated_ts: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    __table_args__ = (Index("idx_branch_heads_repo_hash", "repo", "current_hash"),)
+    __table_args__ = (Index("idx_branch_heads_prov_repo_hash", "provider_id", "repo", "current_hash"),)
 
 
 class BranchEvent(Base):
     __tablename__ = "branch_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider_id: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
     repo: Mapped[str] = mapped_column(Text, nullable=False)
     branch_name: Mapped[str] = mapped_column(Text, nullable=False)
     git_hash: Mapped[str] = mapped_column(Text, nullable=False)
     updated_ts: Mapped[int] = mapped_column(Integer, nullable=False)
 
     __table_args__ = (
-        Index("idx_branch_events_repo_branch_ts", "repo", "branch_name", "updated_ts"),
-        Index("idx_branch_events_repo_hash_ts", "repo", "git_hash", "updated_ts"),
+        Index("idx_branch_events_prov_repo_branch_ts", "provider_id", "repo", "branch_name", "updated_ts"),
+        Index("idx_branch_events_prov_repo_hash_ts", "provider_id", "repo", "git_hash", "updated_ts"),
     )
 
 
 class Repo(Base):
     __tablename__ = "repos"
 
+    provider_id: Mapped[str] = mapped_column(Text, primary_key=True, server_default=text("''"))
     repo: Mapped[str] = mapped_column(Text, primary_key=True)
     first_seen_ts: Mapped[int] = mapped_column(Integer, nullable=False)
     last_seen_ts: Mapped[int] = mapped_column(Integer, nullable=False)

@@ -330,7 +330,7 @@ def _make_fake_auth_state(enabled: bool = True):
     async def _lookup(repo_full: str) -> str | None:
         from covsrv import db as _db
 
-        provider_url = await _db.provider_url_for_repo(repo_full)
+        provider_url = await _db.provider_url_for_repo("gh", repo_full)
         if provider_url is None:
             return None
         purl = provider_url.rstrip("/")
@@ -346,7 +346,7 @@ def _make_fake_auth_state(enabled: bool = True):
     async def _url_lookup(repo_full: str) -> str | None:
         from covsrv import db as _db
 
-        return await _db.provider_url_for_repo(repo_full)
+        return await _db.provider_url_for_repo("gh", repo_full)
 
     state.repo_provider_url_lookup = _url_lookup
     return state
@@ -432,7 +432,7 @@ class TestAuthCallbackRoute:
         """Login → callback → session established."""
         # 1. Start login
         login_resp = await auth_client.get(
-            "/auth/fakeprov/login?next=/alice/proj/b/main",
+            "/auth/fakeprov/login?next=/gh/alice/proj/b/main",
             follow_redirects=False,
         )
         assert login_resp.status_code == 307
@@ -453,7 +453,7 @@ class TestAuthCallbackRoute:
             follow_redirects=False,
         )
         assert cb_resp.status_code == 307
-        assert "/alice/proj/b/main" in cb_resp.headers["location"]
+        assert "/gh/alice/proj/b/main" in cb_resp.headers["location"]
 
 
 class TestAuthLogoutRoute:
@@ -507,7 +507,7 @@ class TestAuthLogoutRoute:
         # 3. Verify session works (accessing protected page succeeds)
         auth_client.cookies = session_cookies
         dash_resp = await auth_client.get(
-            "/alice/proj/b/main",
+            "/gh/alice/proj/b/main",
             follow_redirects=False,
         )
         assert dash_resp.status_code == 200
@@ -525,7 +525,7 @@ class TestAuthLogoutRoute:
         # 5. Access the protected page again — should redirect to login
         auth_client.cookies = cleared_cookies
         post_logout = await auth_client.get(
-            "/alice/proj/b/main",
+            "/gh/alice/proj/b/main",
             follow_redirects=False,
         )
         assert post_logout.status_code == 307
@@ -576,7 +576,7 @@ class TestAuthLogoutRoute:
         # 4. Protected page should require login
         auth_client.cookies = cleared_cookies
         post_logout = await auth_client.get(
-            "/alice/proj/b/main",
+            "/gh/alice/proj/b/main",
             follow_redirects=False,
         )
         assert post_logout.status_code == 307
@@ -608,7 +608,7 @@ class TestRequireViewPermission:
         )
 
         resp = await auth_client.get(
-            "/alice/proj/b/main",
+            "/gh/alice/proj/b/main",
             follow_redirects=False,
         )
         # Should redirect to auth login
@@ -617,7 +617,7 @@ class TestRequireViewPermission:
         assert "/auth/fakeprov/login" in loc
         # The next param should be the *path*, not a full URL
         assert (
-            "next=%2Falice%2Fproj%2Fb%2Fmain" in loc or "next=/alice/proj/b/main" in loc
+            "next=%2Fgh%2Falice%2Fproj%2Fb%2Fmain" in loc or "next=/gh/alice/proj/b/main" in loc
         )
 
     async def test_unauthenticated_api_returns_401(self, auth_client: AsyncClient):
@@ -635,7 +635,7 @@ class TestRequireViewPermission:
         )
 
         resp = await auth_client.get(
-            "/api/alice/proj/b/main/trend",
+            "/api/gh/alice/proj/b/main/trend",
             follow_redirects=False,
             headers={"Accept": "application/json"},
         )
@@ -680,7 +680,7 @@ class TestRequireViewPermission:
         # Now access a protected page
         auth_client.cookies = session_cookies
         resp = await auth_client.get(
-            "/alice/proj/b/main",
+            "/gh/alice/proj/b/main",
         )
         assert resp.status_code == 200
 
@@ -721,7 +721,7 @@ class TestRequireViewPermission:
         # Access dashboard
         auth_client.cookies = session_cookies
         resp = await auth_client.get(
-            "/alice/proj/b/main",
+            "/gh/alice/proj/b/main",
         )
         assert resp.status_code == 200
         cc = resp.headers.get("cache-control", "")
@@ -766,7 +766,7 @@ class TestRequireViewPermission:
         # "private-repo" is denied by _FakeProvider.can_view_repo
         auth_client.cookies = session_cookies
         resp = await auth_client.get(
-            "/alice/private-repo/b/main",
+            "/gh/alice/private-repo/b/main",
             follow_redirects=False,
         )
         assert resp.status_code == 403
@@ -809,7 +809,7 @@ class TestRequireViewPermission:
         # API request for denied repo → 404
         auth_client.cookies = session_cookies
         resp = await auth_client.get(
-            "/api/alice/private-repo/b/main/trend",
+            "/api/gh/alice/private-repo/b/main/trend",
             follow_redirects=False,
             headers={"Accept": "application/json"},
         )
@@ -852,7 +852,7 @@ class TestRequireViewPermission:
         # Access repo whose token is "expired" → should redirect to login
         auth_client.cookies = session_cookies
         resp = await auth_client.get(
-            "/alice/expired-repo/b/main",
+            "/gh/alice/expired-repo/b/main",
             follow_redirects=False,
         )
         assert resp.status_code == 307
@@ -864,11 +864,11 @@ class TestAuthDisabledPassthrough:
     """When auth is disabled, all routes behave normally (no login needed)."""
 
     async def test_dashboard_accessible_without_login(self, client):
-        resp = await client.get("/alice/proj/b/main")
+        resp = await client.get("/gh/alice/proj/b/main")
         assert resp.status_code == 200
 
     async def test_api_accessible_without_login(self, client):
-        resp = await client.get("/api/alice/proj/b/main/trend")
+        resp = await client.get("/api/gh/alice/proj/b/main/trend")
         assert resp.status_code == 200
 
 
@@ -890,7 +890,7 @@ class TestPublicRepoBypass:
         )
 
         resp = await auth_client.get(
-            "/alice/public-repo/b/main",
+            "/gh/alice/public-repo/b/main",
             follow_redirects=False,
         )
         assert resp.status_code == 200
@@ -920,7 +920,7 @@ class TestUnconfiguredProviderBypass:
             return_value=True,
         ):
             resp = await auth_client.get(
-                "/alice/github-repo/b/main",
+                "/gh/alice/github-repo/b/main",
                 follow_redirects=False,
             )
         assert resp.status_code == 200
@@ -946,7 +946,7 @@ class TestUnconfiguredProviderBypass:
             return_value=False,
         ):
             resp = await auth_client.get(
-                "/alice/github-private/b/main",
+                "/gh/alice/github-private/b/main",
                 follow_redirects=False,
             )
         assert resp.status_code == 404
@@ -954,7 +954,7 @@ class TestUnconfiguredProviderBypass:
     async def test_unknown_repo_denied(self, auth_client: AsyncClient):
         """A repo with no reports in the DB at all → 404."""
         resp = await auth_client.get(
-            "/unknown/noreports/b/main",
+            "/gh/unknown/noreports/b/main",
             follow_redirects=False,
         )
         assert resp.status_code == 404
@@ -967,7 +967,7 @@ class TestUnconfiguredProviderBypass:
 
 class TestProviderUrlForRepo:
     async def test_returns_none_for_unknown(self, initialized_db):
-        result = await db.provider_url_for_repo("unknown/repo")
+        result = await db.provider_url_for_repo("gh", "unknown/repo")
         assert result is None
 
     async def test_returns_provider_url(self, initialized_db, tmp_data_dir):
@@ -978,7 +978,7 @@ class TestProviderUrlForRepo:
             repo_full="alice/proj",
             provider_url="https://gitea.example.com",
         )
-        result = await db.provider_url_for_repo("alice/proj")
+        result = await db.provider_url_for_repo("gh", "alice/proj")
         assert result == "https://gitea.example.com"
 
     async def test_returns_latest(self, initialized_db, tmp_data_dir):
@@ -998,5 +998,5 @@ class TestProviderUrlForRepo:
             received_ts=2000,
             provider_url="https://new.example.com",
         )
-        result = await db.provider_url_for_repo("alice/proj")
+        result = await db.provider_url_for_repo("gh", "alice/proj")
         assert result == "https://new.example.com"

@@ -124,6 +124,7 @@ class TestReportIngestDTO:
             branch="main",
             sha="abc1234567",
             provider_name="myprov",
+            provider_id="pid",
         )
         assert dto.owner == "alice"
         assert dto.repo == "proj"
@@ -131,6 +132,7 @@ class TestReportIngestDTO:
         assert dto.branch == "main"
         assert dto.sha == "abc1234567"
         assert dto.provider_name == "myprov"
+        assert dto.provider_id == "pid"
         assert dto.provider_url == "https://github.com"
 
     def test_from_form_with_provider_url(self):
@@ -140,6 +142,7 @@ class TestReportIngestDTO:
             branch="main",
             sha="abc1234567",
             provider_name="myprov",
+            provider_id="pid",
             provider_url="https://gitlab.com",
         )
         assert dto.provider_url == "https://gitlab.com"
@@ -151,6 +154,7 @@ class TestReportIngestDTO:
             branch="main",
             sha="abc1234567",
             provider_name="myprov",
+            provider_id="pid",
             provider_url="https://gitlab.com/",
         )
         assert dto.provider_url == "https://gitlab.com"
@@ -162,6 +166,7 @@ class TestReportIngestDTO:
             branch="main",
             sha="abc1234567",
             provider_name="myprov",
+            provider_id="pid",
             provider_url="",
         )
         assert dto.provider_url == "https://github.com"
@@ -390,57 +395,57 @@ class TestParseCoverageXml:
 
 class TestDashboardHtmlFor:
     def test_hash_kind(self):
-        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
-        assert "/api/alice/proj/h/abc123/trend" in html
-        assert "/api/alice/proj/h/abc123/latest/uncovered-lines" in html
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
+        assert "/api/myprov/alice/proj/h/abc123/trend" in html
+        assert "/api/myprov/alice/proj/h/abc123/latest/uncovered-lines" in html
         assert "/download/" in html  # download links present
         # Verify no raw Jinja2 placeholders remain
         assert "{{" not in html
         assert "}}" not in html
 
     def test_branch_kind(self):
-        html = app_module.dashboard_html_for("b", "alice/proj", "main")
-        assert "/api/alice/proj/b/main/trend" in html
-        assert "/api/alice/proj/b/main/latest/uncovered-lines" in html
+        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
+        assert "/api/myprov/alice/proj/b/main/trend" in html
+        assert "/api/myprov/alice/proj/b/main/latest/uncovered-lines" in html
 
     def test_contains_trend_limit(self):
-        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
         assert str(app_module.TREND_LIMIT) in html
 
     def test_hash_contains_nav_urls(self):
-        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
         assert "github.com/alice/proj" in html
-        assert "/alice/proj/h/abc123" in html  # raw_framed_url
+        assert "/myprov/alice/proj/h/abc123" in html  # raw_framed_url
 
     def test_branch_hides_spreadsheet(self):
-        html = app_module.dashboard_html_for("b", "alice/proj", "main")
+        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
         assert 'style="display:none"' in html  # spreadsheet btn hidden
 
     def test_custom_provider_url(self):
         html = app_module.dashboard_html_for(
-            "h", "alice/proj", "abc123", provider_url="https://gitlab.com"
+            "h", "myprov", "alice/proj", "abc123", provider_url="https://gitlab.com"
         )
         assert "gitlab.com/alice/proj" in html
         assert "github.com" not in html
 
     def test_default_provider_url(self):
-        html = app_module.dashboard_html_for("h", "alice/proj", "abc123")
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
         assert "github.com/alice/proj" in html
 
 
 class TestFramedHtmlFor:
     def test_renders_with_iframe(self):
-        html = app_module.framed_html_for("alice/proj", "abc123")
+        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
         assert "iframe" in html
-        assert "/raw/alice/proj/h/abc123/" in html
+        assert "/raw/myprov/alice/proj/h/abc123/" in html
         assert "github.com/alice/proj" in html
-        assert "/alice/proj/h/abc123/chart" in html
+        assert "/myprov/alice/proj/h/abc123/chart" in html
         assert "{{" not in html
         assert "}}" not in html
 
     def test_custom_provider_url(self):
         html = app_module.framed_html_for(
-            "alice/proj", "abc123", provider_url="https://gitlab.com"
+            "myprov", "alice/proj", "abc123", provider_url="https://gitlab.com"
         )
         assert "gitlab.com/alice/proj" in html
         assert "github.com" not in html
@@ -466,10 +471,14 @@ async def seed_report(
     coverage_xml: str = SAMPLE_COVERAGE_XML,
     provider_url: str = "https://github.com",
     provider_name: str = "",
+    provider_id: str = "gh",
 ):
     """Seed a report record + write the HTML directory with coverage.xml."""
     repo_fs = app_module.repo_to_fs(repo_full)
-    report_dir = tmp_data_dir / "covsrv_data" / "reports" / repo_fs / "h" / sha
+    if provider_id:
+        report_dir = tmp_data_dir / "covsrv_data" / "reports" / provider_id / repo_fs / "h" / sha
+    else:
+        report_dir = tmp_data_dir / "covsrv_data" / "reports" / repo_fs / "h" / sha
     html_dir = report_dir / "html"
     html_dir.mkdir(parents=True, exist_ok=True)
 
@@ -484,6 +493,7 @@ async def seed_report(
     async with db.session() as sess:
         sess.add(
             Report(
+                provider_id=provider_id,
                 repo=repo_full,
                 branch_name=branch,
                 git_hash=sha,
@@ -495,13 +505,14 @@ async def seed_report(
             )
         )
         stmt = sqlite_insert(BranchHead).values(
+            provider_id=provider_id,
             repo=repo_full,
             branch_name=branch,
             current_hash=sha,
             updated_ts=received_ts,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=[BranchHead.repo, BranchHead.branch_name],
+            index_elements=[BranchHead.provider_id, BranchHead.repo, BranchHead.branch_name],
             set_={
                 "current_hash": stmt.excluded.current_hash,
                 "updated_ts": stmt.excluded.updated_ts,
@@ -510,13 +521,14 @@ async def seed_report(
         await sess.execute(stmt)
         sess.add(
             BranchEvent(
+                provider_id=provider_id,
                 repo=repo_full,
                 branch_name=branch,
                 git_hash=sha,
                 updated_ts=received_ts,
             )
         )
-        await db.upsert_repo_seen(sess, repo_full, received_ts)
+        await db.upsert_repo_seen(sess, provider_id, repo_full, received_ts)
 
     return report_dir
 
@@ -540,9 +552,9 @@ class TestRootEndpoint:
 
 class TestRepoHome:
     async def test_redirects_to_branch_main(self, client: AsyncClient):
-        resp = await client.get("/alice/proj/", follow_redirects=False)
+        resp = await client.get("/gh/alice/proj/", follow_redirects=False)
         assert resp.status_code in (301, 302, 307, 308)
-        assert "/alice/proj/b/main" in resp.headers["location"]
+        assert "/gh/alice/proj/b/main" in resp.headers["location"]
 
 
 # -----------------------------------------------------------------------
@@ -552,7 +564,7 @@ class TestRepoHome:
 
 class TestBranchDashboard:
     async def test_returns_html(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/alice/proj/b/main")
+        resp = await client.get("/gh/alice/proj/b/main")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "Coverage" in resp.text
@@ -560,8 +572,8 @@ class TestBranchDashboard:
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        await seed_report(tmp_data_dir, provider_url="https://gitlab.com")
-        resp = await client.get("/alice/proj/b/main")
+        await seed_report(tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh")
+        resp = await client.get("/gh/alice/proj/b/main")
         assert resp.status_code == 200
         assert "gitlab.com/alice/proj" in resp.text
 
@@ -576,44 +588,44 @@ SHA = "abc1234567890abcdef1234567890abcdef123456"
 
 class TestHashFramedView:
     async def test_returns_framed_html(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/alice/proj/h/{SHA}")
+        resp = await client.get(f"/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "iframe" in resp.text
-        assert f"/raw/alice/proj/h/{SHA}/" in resp.text
+        assert f"/raw/gh/alice/proj/h/{SHA}/" in resp.text
 
     async def test_contains_nav_buttons(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/alice/proj/h/{SHA}")
+        resp = await client.get(f"/gh/alice/proj/h/{SHA}")
         assert "github.com/alice/proj" in resp.text
-        assert f"/alice/proj/h/{SHA}/chart" in resp.text
+        assert f"/gh/alice/proj/h/{SHA}/chart" in resp.text
 
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        await seed_report(tmp_data_dir, provider_url="https://gitlab.com")
-        resp = await client.get(f"/alice/proj/h/{SHA}")
+        await seed_report(tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh")
+        resp = await client.get(f"/gh/alice/proj/h/{SHA}")
         assert "gitlab.com/alice/proj" in resp.text
 
 
 class TestHashChart:
     async def test_returns_chart_html(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/alice/proj/h/{SHA}/chart")
+        resp = await client.get(f"/gh/alice/proj/h/{SHA}/chart")
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "Coverage" in resp.text
-        assert f"/api/alice/proj/h/{SHA}/trend" in resp.text
+        assert f"/api/gh/alice/proj/h/{SHA}/trend" in resp.text
 
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        await seed_report(tmp_data_dir, provider_url="https://gitlab.com")
-        resp = await client.get(f"/alice/proj/h/{SHA}/chart")
+        await seed_report(tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh")
+        resp = await client.get(f"/gh/alice/proj/h/{SHA}/chart")
         assert "gitlab.com/alice/proj" in resp.text
 
 
 class TestRawHashRedirect:
     async def test_redirect_appends_slash(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/raw/alice/proj/h/{SHA}", follow_redirects=False)
+        resp = await client.get(f"/raw/gh/alice/proj/h/{SHA}", follow_redirects=False)
         assert resp.status_code == 307
         assert resp.headers["location"].endswith("/")
 
@@ -621,24 +633,24 @@ class TestRawHashRedirect:
 class TestRawHashIndex:
     async def test_serves_index(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/raw/alice/proj/h/{SHA}/")
+        resp = await client.get(f"/raw/gh/alice/proj/h/{SHA}/")
         assert resp.status_code == 200
         assert "report" in resp.text
 
     async def test_404_when_missing(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/raw/alice/proj/h/nonexistent1234567/")
+        resp = await client.get("/raw/gh/alice/proj/h/nonexistent1234567/")
         assert resp.status_code == 404
 
 
 class TestRawHashFile:
     async def test_serves_asset(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/raw/alice/proj/h/{SHA}/style.css")
+        resp = await client.get(f"/raw/gh/alice/proj/h/{SHA}/style.css")
         assert resp.status_code == 200
 
     async def test_404_for_missing_file(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/raw/alice/proj/h/{SHA}/nonexistent.js")
+        resp = await client.get(f"/raw/gh/alice/proj/h/{SHA}/nonexistent.js")
         assert resp.status_code == 404
 
 
@@ -650,7 +662,7 @@ class TestRawHashFile:
 class TestBadgeHash:
     async def test_returns_svg(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/badge/alice/proj/h/{SHA}")
+        resp = await client.get(f"/badge/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 200
         assert "svg" in resp.headers["content-type"]
         assert "<svg" in resp.text
@@ -658,33 +670,33 @@ class TestBadgeHash:
     async def test_unknown_hash_returns_unknown(
         self, client: AsyncClient, tmp_data_dir
     ):
-        resp = await client.get("/badge/alice/proj/h/0000000deadbeef")
+        resp = await client.get("/badge/gh/alice/proj/h/0000000deadbeef")
         assert resp.status_code == 200
         assert "unknown" in resp.text
 
     async def test_immutable_cache_control(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/badge/alice/proj/h/{SHA}")
+        resp = await client.get(f"/badge/gh/alice/proj/h/{SHA}")
         assert "immutable" in resp.headers.get("cache-control", "")
 
 
 class TestBadgeBranch:
     async def test_returns_svg(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get("/badge/alice/proj/b/main")
+        resp = await client.get("/badge/gh/alice/proj/b/main")
         assert resp.status_code == 200
         assert "svg" in resp.headers["content-type"]
 
     async def test_unknown_branch_returns_unknown(
         self, client: AsyncClient, tmp_data_dir
     ):
-        resp = await client.get("/badge/alice/proj/b/nonexistent")
+        resp = await client.get("/badge/gh/alice/proj/b/nonexistent")
         assert resp.status_code == 200
         assert "unknown" in resp.text
 
     async def test_short_cache_control(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get("/badge/alice/proj/b/main")
+        resp = await client.get("/badge/gh/alice/proj/b/main")
         cc = resp.headers.get("cache-control", "")
         assert "max-age=60" in cc
 
@@ -696,21 +708,21 @@ class TestBadgeBranch:
 
 class TestApiHashTrend:
     async def test_empty(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/trend")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/trend")
         assert resp.status_code == 200
         data = resp.json()
         assert data["points"] == []
 
     async def test_with_data(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/trend")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/trend")
         data = resp.json()
         assert len(data["points"]) == 1
         assert data["points"][0]["overall_percent"] == 85.0
 
     async def test_limit_param(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/trend?limit=1")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/trend?limit=1")
         data = resp.json()
         assert len(data["points"]) <= 1
 
@@ -722,14 +734,14 @@ class TestApiHashTrend:
 
 class TestApiHashWorstFiles:
     async def test_no_report(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/latest/worst-files")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/latest/worst-files")
         data = resp.json()
         assert data["latest"] is None
         assert data["files"] == []
 
     async def test_with_report(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/latest/worst-files")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/latest/worst-files")
         data = resp.json()
         assert data["latest"] is not None
         assert data["latest"]["overall_percent"] == 85.0
@@ -743,13 +755,13 @@ class TestApiHashWorstFiles:
 
 class TestApiHashUncoveredLines:
     async def test_no_report(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/latest/uncovered-lines")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/latest/uncovered-lines")
         data = resp.json()
         assert data["latest"] is None
 
     async def test_with_report(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/api/alice/proj/h/{SHA}/latest/uncovered-lines")
+        resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/latest/uncovered-lines")
         data = resp.json()
         assert data["latest"]["overall_percent"] == 85.0
         assert len(data["files"]) == 2
@@ -766,13 +778,13 @@ class TestApiHashUncoveredLines:
 
 class TestApiBranchTrend:
     async def test_empty(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/api/alice/proj/b/main/trend")
+        resp = await client.get("/api/gh/alice/proj/b/main/trend")
         data = resp.json()
         assert data["points"] == []
 
     async def test_with_data(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get("/api/alice/proj/b/main/trend")
+        resp = await client.get("/api/gh/alice/proj/b/main/trend")
         data = resp.json()
         assert len(data["points"]) == 1
 
@@ -784,13 +796,13 @@ class TestApiBranchTrend:
 
 class TestApiBranchWorstFiles:
     async def test_no_head(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/api/alice/proj/b/main/latest/worst-files")
+        resp = await client.get("/api/gh/alice/proj/b/main/latest/worst-files")
         data = resp.json()
         assert data["latest"] is None
 
     async def test_with_report(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get("/api/alice/proj/b/main/latest/worst-files")
+        resp = await client.get("/api/gh/alice/proj/b/main/latest/worst-files")
         data = resp.json()
         assert data["latest"] is not None
         assert len(data["files"]) == 2
@@ -803,13 +815,13 @@ class TestApiBranchWorstFiles:
 
 class TestApiBranchUncoveredLines:
     async def test_no_head(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/api/alice/proj/b/main/latest/uncovered-lines")
+        resp = await client.get("/api/gh/alice/proj/b/main/latest/uncovered-lines")
         data = resp.json()
         assert data["latest"] is None
 
     async def test_with_report(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get("/api/alice/proj/b/main/latest/uncovered-lines")
+        resp = await client.get("/api/gh/alice/proj/b/main/latest/uncovered-lines")
         data = resp.json()
         assert data["latest"] is not None
         assert len(data["files"]) == 2
@@ -823,37 +835,37 @@ class TestApiBranchUncoveredLines:
 class TestDownloads:
     async def test_hash_download_json(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/download/json/alice/proj/h/{SHA}")
+        resp = await client.get(f"/download/json/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 200
 
     async def test_hash_download_xml(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/download/xml/alice/proj/h/{SHA}")
+        resp = await client.get(f"/download/xml/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 200
 
     async def test_hash_download_lcov(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/download/lcov/alice/proj/h/{SHA}")
+        resp = await client.get(f"/download/lcov/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 200
 
     async def test_hash_download_unknown_token(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get(f"/download/nope/alice/proj/h/{SHA}")
+        resp = await client.get(f"/download/nope/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 404
 
     async def test_hash_download_missing_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        resp = await client.get("/download/json/alice/proj/h/nonexistent1234567")
+        resp = await client.get("/download/json/gh/alice/proj/h/nonexistent1234567")
         assert resp.status_code == 404
 
     async def test_branch_download_json(self, client: AsyncClient, tmp_data_dir):
         await seed_report(tmp_data_dir)
-        resp = await client.get("/download/json/alice/proj/b/main")
+        resp = await client.get("/download/json/gh/alice/proj/b/main")
         assert resp.status_code == 200
 
     async def test_branch_download_no_head(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/download/json/alice/proj/b/nonexistent")
+        resp = await client.get("/download/json/gh/alice/proj/b/nonexistent")
         assert resp.status_code == 404
 
 
@@ -883,6 +895,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": "feed1234567890abcdef1234567890abcdef12345",
+                "provider": "gh",
                 "provider_url": "https://github.com",
             },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
@@ -893,6 +906,7 @@ class TestIngestReport:
         assert data["status"] == "ok"
         assert data["overall_percent"] == pytest.approx(85.0, abs=0.01)
         assert "hash_dashboard_url" in data
+        assert "/gh/alice/proj/" in data["hash_dashboard_url"]
 
     async def test_duplicate_ingest_returns_409(
         self, auth_client: AsyncClient, tmp_data_dir
@@ -906,6 +920,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": sha,
+                "provider": "gh",
                 "provider_url": "https://github.com",
             },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
@@ -921,6 +936,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": sha,
+                "provider": "gh",
                 "provider_url": "https://github.com",
             },
             files={"tarball": ("report.tar.gz", tarball2, "application/gzip")},
@@ -947,6 +963,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": "noxml234567890abcdef1234567890abcdef12345",
+                "provider": "gh",
                 "provider_url": "https://github.com",
             },
             files={"tarball": ("report.tar.gz", buf.read(), "application/gzip")},
@@ -965,6 +982,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": "prov1234567890abcdef1234567890abcdef12345",
+                "provider": "gh",
                 "provider_url": "https://gitlab.com",
             },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
@@ -976,7 +994,7 @@ class TestIngestReport:
 
         # Verify the stored report uses the custom provider_url
         row = await db.latest_report_for_repo_hash(
-            "alice/proj", "prov1234567890abcdef1234567890abcdef12345"
+            "gh", "alice/proj", "prov1234567890abcdef1234567890abcdef12345"
         )
         assert row is not None
         assert row["provider_url"] == "https://gitlab.com"
@@ -992,6 +1010,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "dev",
                 "sha": "dflt1234567890abcdef1234567890abcdef12345",
+                "provider": "gh",
             },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
             headers={"x-access-token": "dummy"},
@@ -999,7 +1018,7 @@ class TestIngestReport:
         assert resp.status_code == 200
 
         row = await db.latest_report_for_repo_hash(
-            "alice/proj", "dflt1234567890abcdef1234567890abcdef12345"
+            "gh", "alice/proj", "dflt1234567890abcdef1234567890abcdef12345"
         )
         assert row is not None
         assert row["provider_url"] == "https://github.com"
@@ -1014,6 +1033,7 @@ class TestIngestReport:
                 "repo": "proj",
                 "branch": "main",
                 "sha": "nope1234567890abcdef1234567890abcdef12345",
+                "provider": "gh",
             },
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
         )

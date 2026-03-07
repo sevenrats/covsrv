@@ -130,6 +130,7 @@ class ReportIngestDTO:
     branch: str
     sha: str
     provider_name: str
+    provider_id: str  # stable DB identifier
     provider_url: str  # derived from config
 
     @classmethod
@@ -140,6 +141,7 @@ class ReportIngestDTO:
         branch: str,
         sha: str,
         provider_name: str,
+        provider_id: str = "",
         provider_url: str = DEFAULT_PROVIDER_URL,
     ) -> "ReportIngestDTO":
         owner_s, repo_s, repo_full = normalize_owner_repo(owner, repo)
@@ -154,6 +156,8 @@ class ReportIngestDTO:
 
         pname = provider_name.strip() if isinstance(provider_name, str) else ""
 
+        pid = provider_id.strip() if isinstance(provider_id, str) else ""
+
         purl = (
             provider_url.strip().rstrip("/")
             if isinstance(provider_url, str) and provider_url.strip()
@@ -167,6 +171,7 @@ class ReportIngestDTO:
             branch=branch_s,
             sha=sha_s,
             provider_name=pname,
+            provider_id=pid,
             provider_url=purl,
         )
 
@@ -210,6 +215,35 @@ def verify_report_access(token: str, provider_name: str, owner: str, repo: str) 
 
     # Legacy fallback: single global token hash
     verify_token(token)
+
+
+# ----------------------------
+# Provider resolution helpers
+# ----------------------------
+
+
+def _get_provider_id(provider_name: str) -> str:
+    """Resolve a provider URL-slug (TOML key) to its stable DB id.
+
+    When no config is loaded (legacy mode), the name is used as-is.
+    """
+    if config_manager is not None:
+        pid = config_manager.provider_id_for_name(provider_name)
+        if pid is None:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown provider: {provider_name!r}"
+            )
+        return pid
+    return provider_name
+
+
+def _get_provider_url(provider_name: str) -> str:
+    """Return the base URL for the given provider name."""
+    if config_manager is not None:
+        entry = config_manager.get_provider(provider_name)
+        if entry is not None:
+            return entry.url
+    return DEFAULT_PROVIDER_URL
 
 
 # ----------------------------
@@ -444,9 +478,10 @@ async def ingest_report(
 ) -> dict[str, Any]:
     token = extract_token(authorization, x_access_token)
 
-    # Resolve provider name → URL from config, or accept raw URL for legacy
+    # Resolve provider name → URL + stable id from config
     pname = provider.strip() if provider else ""
     purl = provider_url.strip().rstrip("/") if provider_url else ""
+    pid = ""
 
     if config_manager is not None:
         # Config-driven mode: provider name is required
@@ -462,22 +497,24 @@ async def ingest_report(
                 detail=f"Unknown provider: {pname!r}",
             )
         purl = entry.url
+        pid = entry.id
     else:
         # Legacy mode: fall back to provider_url if no name given
         if not pname:
             pname = ""
+        pid = pname  # no config → name is the id
         if not purl:
             purl = DEFAULT_PROVIDER_URL
 
     verify_report_access(token, pname, owner.strip(), repo.strip())
 
-    dto = ReportIngestDTO.from_form(owner, repo, branch, sha, pname, purl)
+    dto = ReportIngestDTO.from_form(owner, repo, branch, sha, pname, pid, purl)
     received_ts = int(time.time())
 
     repo_fs = repo_to_fs(dto.repo_full)
 
-    # Immutable location: reports/<repo>/h/<sha>/
-    report_dir = REPORTS_DIR / repo_fs / "h" / dto.sha
+    # Immutable location: reports/<provider_id>/<repo>/h/<sha>/
+    report_dir = REPORTS_DIR / dto.provider_id / repo_fs / "h" / dto.sha
     if await anyio.Path(report_dir).exists():
         # preserve "original" report for that commit hash
         raise HTTPException(
@@ -520,6 +557,7 @@ async def ingest_report(
     # DB: insert report + update branch head + add branch event
     async with db.session() as sess:
         report = Report(
+            provider_id=dto.provider_id,
             repo=dto.repo_full,
             branch_name=dto.branch,
             git_hash=dto.sha,
@@ -541,6 +579,7 @@ async def ingest_report(
 
         sess.add(
             BranchEvent(
+                provider_id=dto.provider_id,
                 repo=dto.repo_full,
                 branch_name=dto.branch,
                 git_hash=dto.sha,
@@ -548,22 +587,25 @@ async def ingest_report(
             )
         )
         await db.upsert_branch_head(
-            sess, dto.repo_full, dto.branch, dto.sha, received_ts
+            sess, dto.provider_id, dto.repo_full, dto.branch, dto.sha, received_ts
         )
-        await db.upsert_repo_seen(sess, dto.repo_full, received_ts)
+        await db.upsert_repo_seen(sess, dto.provider_id, dto.repo_full, received_ts)
 
+    # Build response URLs using the provider name (TOML key) for URL slugs.
+    pslug = dto.provider_name
     return {
         "status": "ok",
         "owner": dto.owner,
         "repo": dto.repo,
         "branch": dto.branch,
         "sha": dto.sha,
+        "provider": dto.provider_name,
         "received_ts": received_ts,
         "overall_percent": overall_percent,
-        "hash_dashboard_url": f"/{dto.owner}/{dto.repo}/h/{dto.sha}",
-        "hash_chart_url": f"/{dto.owner}/{dto.repo}/h/{dto.sha}/chart",
-        "branch_dashboard_url": f"/{dto.owner}/{dto.repo}/b/{dto.branch}",
-        "hash_raw_url": f"/raw/{dto.owner}/{dto.repo}/h/{dto.sha}/",
+        "hash_dashboard_url": f"/{pslug}/{dto.owner}/{dto.repo}/h/{dto.sha}",
+        "hash_chart_url": f"/{pslug}/{dto.owner}/{dto.repo}/h/{dto.sha}/chart",
+        "branch_dashboard_url": f"/{pslug}/{dto.owner}/{dto.repo}/b/{dto.branch}",
+        "hash_raw_url": f"/raw/{pslug}/{dto.owner}/{dto.repo}/h/{dto.sha}/",
     }
 
 
@@ -572,16 +614,14 @@ async def ingest_report(
 # ----------------------------
 
 
-def _resolve_provider_url(row: dict[str, Any] | None) -> str:
-    """Resolve provider URL from a report row, preferring config lookup."""
-    if row is None:
-        return DEFAULT_PROVIDER_URL
-    # If we have a provider_name and config, look up the URL from config
-    pname = row.get("provider_name", "")
-    if pname and config_manager is not None:
-        entry = config_manager.get_provider(pname)
+def _resolve_provider_url(provider_name: str, row: dict[str, Any] | None) -> str:
+    """Resolve provider URL, preferring config lookup by provider name."""
+    if config_manager is not None:
+        entry = config_manager.get_provider(provider_name)
         if entry:
             return entry.url
+    if row is None:
+        return DEFAULT_PROVIDER_URL
     # Fallback to stored provider_url
     purl = row.get("provider_url", "")
     return purl if purl else DEFAULT_PROVIDER_URL
@@ -589,6 +629,7 @@ def _resolve_provider_url(row: dict[str, Any] | None) -> str:
 
 def dashboard_html_for(
     kind: str,
+    provider_name: str,
     repo_full: str,
     ref: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
@@ -598,16 +639,16 @@ def dashboard_html_for(
     github_url = f"{base}/{owner}/{name}"
 
     if kind == "h":
-        raw_url = f"/{owner}/{name}/h/"
-        trend_url = f"/api/{owner}/{name}/h/{ref}/trend"
-        uncovered_url = f"/api/{owner}/{name}/h/{ref}/latest/uncovered-lines"
-        download_suffix = f"/{owner}/{name}/h/{ref}"
-        raw_framed_url = f"/{owner}/{name}/h/{ref}"
+        raw_url = f"/{provider_name}/{owner}/{name}/h/"
+        trend_url = f"/api/{provider_name}/{owner}/{name}/h/{ref}/trend"
+        uncovered_url = f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/uncovered-lines"
+        download_suffix = f"/{provider_name}/{owner}/{name}/h/{ref}"
+        raw_framed_url = f"/{provider_name}/{owner}/{name}/h/{ref}"
     else:
-        raw_url = f"/{owner}/{name}/h/"
-        trend_url = f"/api/{owner}/{name}/b/{ref}/trend"
-        uncovered_url = f"/api/{owner}/{name}/b/{ref}/latest/uncovered-lines"
-        download_suffix = f"/{owner}/{name}/b/{ref}"
+        raw_url = f"/{provider_name}/{owner}/{name}/h/"
+        trend_url = f"/api/{provider_name}/{owner}/{name}/b/{ref}/trend"
+        uncovered_url = f"/api/{provider_name}/{owner}/{name}/b/{ref}/latest/uncovered-lines"
+        download_suffix = f"/{provider_name}/{owner}/{name}/b/{ref}"
         raw_framed_url = ""
 
     template = _jinja_env.get_template("dashboard.html")
@@ -628,16 +669,18 @@ async def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
 
 
-@app.get("/badge/{owner}/{name}/h/{git_hash}")
+@app.get("/badge/{provider}/{owner}/{name}/h/{git_hash}")
 async def badge_hash_svg(
+    provider: str,
     owner: str,
     name: str,
     git_hash: str,
     label: str = "coverage",
     decimals: int = 1,
 ) -> Response:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
 
     percent = None if row is None else float(row["overall_percent"])
     msg = coverage_message(percent, decimals=max(0, min(int(decimals), 3)))
@@ -651,20 +694,22 @@ async def badge_hash_svg(
     return svg_response(svg, cache_control=cache, etag_seed=seed)
 
 
-@app.get("/badge/{owner}/{name}/b/{branch:path}")
+@app.get("/badge/{provider}/{owner}/{name}/b/{branch:path}")
 async def badge_branch_svg(
+    provider: str,
     owner: str,
     name: str,
     branch: str,
     label: str = "coverage",
     decimals: int = 1,
 ) -> Response:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    head_hash = await db.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
 
     percent: float | None = None
     if head_hash is not None:
-        row = await db.latest_report_for_repo_hash(repo_full, head_hash)
+        row = await db.latest_report_for_repo_hash(provider_id, repo_full, head_hash)
         if row is not None:
             percent = float(row["overall_percent"])
 
@@ -678,25 +723,27 @@ async def badge_branch_svg(
     return svg_response(svg, cache_control=cache, etag_seed=seed)
 
 
-@app.get("/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn)
-async def repo_home(owner: str, name: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/{owner}/{name}/b/main")
+@app.get("/{provider}/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn)
+async def repo_home(provider: str, owner: str, name: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/{provider}/{owner}/{name}/b/main")
 
 
 @app.get(
-    "/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse, dependencies=_authn
+    "/{provider}/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse, dependencies=_authn
 )
 async def repo_branch_dashboard(
-    request: Request, owner: str, name: str, branch: str
+    request: Request, provider: str, owner: str, name: str, branch: str
 ) -> str:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    head_hash = await db.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
     row = None
     if head_hash:
-        row = await db.latest_report_for_repo_hash(repo_full, head_hash)
-    provider_url = _resolve_provider_url(row)
+        row = await db.latest_report_for_repo_hash(provider_id, repo_full, head_hash)
+    provider_url = _resolve_provider_url(provider, row)
     return dashboard_html_for(
         "b",
+        provider,
         repo_full,
         branch,
         provider_url=provider_url,
@@ -708,32 +755,38 @@ async def repo_branch_dashboard(
 # ----------------------------
 
 
-def report_html_root_for_hash(repo_full: str, git_hash: str) -> Path:
+def report_html_root_for_hash(provider_id: str, repo_full: str, git_hash: str) -> Path:
     repo_fs = repo_to_fs(repo_full)
+    new_path = REPORTS_DIR / provider_id / repo_fs / "h" / git_hash / "html"
+    if new_path.exists():
+        return new_path
+    # Legacy fallback: old path without provider_id prefix
     return REPORTS_DIR / repo_fs / "h" / git_hash / "html"
 
 
-@app.get("/raw/{owner}/{name}/h/{git_hash}", dependencies=_authn)
-async def raw_hash_redirect(owner: str, name: str, git_hash: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/raw/{owner}/{name}/h/{git_hash}/", status_code=307)
+@app.get("/raw/{provider}/{owner}/{name}/h/{git_hash}", dependencies=_authn)
+async def raw_hash_redirect(provider: str, owner: str, name: str, git_hash: str) -> RedirectResponse:
+    return RedirectResponse(url=f"/raw/{provider}/{owner}/{name}/h/{git_hash}/", status_code=307)
 
 
-@app.get("/raw/{owner}/{name}/h/{git_hash}/", dependencies=_authn)
-async def raw_hash_index(owner: str, name: str, git_hash: str) -> FileResponse:
+@app.get("/raw/{provider}/{owner}/{name}/h/{git_hash}/", dependencies=_authn)
+async def raw_hash_index(provider: str, owner: str, name: str, git_hash: str) -> FileResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    root = report_html_root_for_hash(repo_full, git_hash)
+    root = report_html_root_for_hash(provider_id, repo_full, git_hash)
     index = root / "index.html"
     if not await anyio.Path(index).exists():
         raise HTTPException(status_code=404, detail="No raw report for this hash")
     return FileResponse(path=str(index))
 
 
-@app.get("/raw/{owner}/{name}/h/{git_hash}/{path:path}", dependencies=_authn)
+@app.get("/raw/{provider}/{owner}/{name}/h/{git_hash}/{path:path}", dependencies=_authn)
 async def raw_hash_file(
-    owner: str, name: str, git_hash: str, path: str
+    provider: str, owner: str, name: str, git_hash: str, path: str
 ) -> FileResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    root = report_html_root_for_hash(repo_full, git_hash)
+    root = report_html_root_for_hash(provider_id, repo_full, git_hash)
 
     p = safe_join_under(root, path)
     ap = anyio.Path(p)
@@ -749,6 +802,7 @@ async def raw_hash_file(
 
 
 def framed_html_for(
+    provider_name: str,
     repo_full: str,
     git_hash: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
@@ -756,8 +810,8 @@ def framed_html_for(
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
     github_url = f"{base}/{owner}/{name}"
-    chart_url = f"/{owner}/{name}/h/{git_hash}/chart"
-    raw_src = f"/raw/{owner}/{name}/h/{git_hash}/"
+    chart_url = f"/{provider_name}/{owner}/{name}/h/{git_hash}/chart"
+    raw_src = f"/raw/{provider_name}/{owner}/{name}/h/{git_hash}/"
 
     template = _jinja_env.get_template("framed_raw.html")
     return template.render(
@@ -768,15 +822,17 @@ def framed_html_for(
 
 
 @app.get(
-    "/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse, dependencies=_authn
+    "/{provider}/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse, dependencies=_authn
 )
 async def repo_hash_framed(
-    request: Request, owner: str, name: str, git_hash: str
+    request: Request, provider: str, owner: str, name: str, git_hash: str
 ) -> str:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
-    provider_url = _resolve_provider_url(row)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
+    provider_url = _resolve_provider_url(provider, row)
     return framed_html_for(
+        provider,
         repo_full,
         git_hash,
         provider_url=provider_url,
@@ -784,18 +840,20 @@ async def repo_hash_framed(
 
 
 @app.get(
-    "/{owner}/{name}/h/{git_hash}/chart",
+    "/{provider}/{owner}/{name}/h/{git_hash}/chart",
     response_class=HTMLResponse,
     dependencies=_authn,
 )
 async def repo_hash_chart(
-    request: Request, owner: str, name: str, git_hash: str
+    request: Request, provider: str, owner: str, name: str, git_hash: str
 ) -> str:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
-    provider_url = _resolve_provider_url(row)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
+    provider_url = _resolve_provider_url(provider, row)
     return dashboard_html_for(
         "h",
+        provider,
         repo_full,
         git_hash,
         provider_url=provider_url,
@@ -807,13 +865,13 @@ async def repo_hash_chart(
 # ----------------------------
 
 
-async def report_html_root_for_branch(repo_full: str, branch: str) -> Path:
-    head_hash = await db.latest_branch_head_hash(repo_full, branch)
+async def report_html_root_for_branch(provider_id: str, repo_full: str, branch: str) -> Path:
+    head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
     if head_hash is None:
         raise HTTPException(
             status_code=404, detail="No branch head for this branch yet"
         )
-    return report_html_root_for_hash(repo_full, head_hash)
+    return report_html_root_for_hash(provider_id, repo_full, head_hash)
 
 
 def tar_gz_dir(src_dir: Path, out_path: Path) -> None:
@@ -847,10 +905,11 @@ async def resolve_download_token(root: Path, token: str) -> tuple[str, Path]:
     return "file", p
 
 
-@app.get("/download/{token}/{owner}/{name}/h/{git_hash}", dependencies=_authn)
-async def hash_download_token(owner: str, name: str, git_hash: str, token: str):
+@app.get("/download/{token}/{provider}/{owner}/{name}/h/{git_hash}", dependencies=_authn)
+async def hash_download_token(provider: str, owner: str, name: str, git_hash: str, token: str):
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    root = report_html_root_for_hash(repo_full, git_hash)
+    root = report_html_root_for_hash(provider_id, repo_full, git_hash)
 
     if not await anyio.Path(root).exists():
         raise HTTPException(status_code=404, detail="No report for this hash")
@@ -877,10 +936,11 @@ async def hash_download_token(owner: str, name: str, git_hash: str, token: str):
     )
 
 
-@app.get("/download/{token}/{owner}/{name}/b/{branch:path}", dependencies=_authn)
-async def branch_download_token(owner: str, name: str, branch: str, token: str):
+@app.get("/download/{token}/{provider}/{owner}/{name}/b/{branch:path}", dependencies=_authn)
+async def branch_download_token(provider: str, owner: str, name: str, branch: str, token: str):
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
-    root = await report_html_root_for_branch(repo_full, branch)
+    root = await report_html_root_for_branch(provider_id, repo_full, branch)
 
     if not await anyio.Path(root).exists():
         raise HTTPException(status_code=404, detail="No report for this branch head")
@@ -912,13 +972,14 @@ async def branch_download_token(owner: str, name: str, branch: str, token: str):
 # ----------------------------
 
 
-@app.get("/api/{owner}/{name}/h/{git_hash}/trend", dependencies=_authn)
+@app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/trend", dependencies=_authn)
 async def api_repo_hash_trend(
-    owner: str, name: str, git_hash: str, limit: int = TREND_LIMIT
+    provider: str, owner: str, name: str, git_hash: str, limit: int = TREND_LIMIT
 ) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
-    points = await db.reports_trend_for_repo_hash(repo_full, git_hash, limit)
+    points = await db.reports_trend_for_repo_hash(provider_id, repo_full, git_hash, limit)
     return JSONResponse(
         {"repo": repo_full, "kind": "hash", "ref": git_hash, "points": points}
     )
@@ -931,14 +992,15 @@ async def latest_stats_from_xml(report_dir: Path) -> tuple[float, list[XmlFileSt
     return await asyncio.to_thread(parse_coverage_xml, xml_path)
 
 
-@app.get("/api/{owner}/{name}/h/{git_hash}/latest/worst-files", dependencies=_authn)
+@app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/latest/worst-files", dependencies=_authn)
 async def api_repo_hash_latest_worst_files(
-    owner: str, name: str, git_hash: str, limit: int = DEFAULT_WORST_FILES
+    provider: str, owner: str, name: str, git_hash: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
@@ -961,14 +1023,15 @@ async def api_repo_hash_latest_worst_files(
     )
 
 
-@app.get("/api/{owner}/{name}/h/{git_hash}/latest/uncovered-lines", dependencies=_authn)
+@app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/latest/uncovered-lines", dependencies=_authn)
 async def api_repo_hash_latest_uncovered_lines(
-    owner: str, name: str, git_hash: str, limit: int = DEFAULT_PIE_FILES
+    provider: str, owner: str, name: str, git_hash: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    row = await db.latest_report_for_repo_hash(repo_full, git_hash)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
@@ -996,34 +1059,36 @@ async def api_repo_hash_latest_uncovered_lines(
 # ----------------------------
 
 
-@app.get("/api/{owner}/{name}/b/{branch:path}/trend", dependencies=_authn)
+@app.get("/api/{provider}/{owner}/{name}/b/{branch:path}/trend", dependencies=_authn)
 async def api_repo_branch_trend(
-    owner: str, name: str, branch: str, limit: int = TREND_LIMIT
+    provider: str, owner: str, name: str, branch: str, limit: int = TREND_LIMIT
 ) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
 
-    evs = await db.branch_events_for(repo_full, branch, limit)
+    evs = await db.branch_events_for(provider_id, repo_full, branch, limit)
     hash_ts_pairs = [(e["git_hash"], int(e["updated_ts"])) for e in evs]
-    points = await db.report_percent_for_hashes(repo_full, hash_ts_pairs)
+    points = await db.report_percent_for_hashes(provider_id, repo_full, hash_ts_pairs)
 
     return JSONResponse(
         {"repo": repo_full, "kind": "branch", "ref": branch, "points": points}
     )
 
 
-@app.get("/api/{owner}/{name}/b/{branch:path}/latest/worst-files", dependencies=_authn)
+@app.get("/api/{provider}/{owner}/{name}/b/{branch:path}/latest/worst-files", dependencies=_authn)
 async def api_repo_branch_latest_worst_files(
-    owner: str, name: str, branch: str, limit: int = DEFAULT_WORST_FILES
+    provider: str, owner: str, name: str, branch: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    head_hash = await db.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
     if head_hash is None:
         return JSONResponse({"latest": None, "files": []})
 
-    row = await db.latest_report_for_repo_hash(repo_full, head_hash)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, head_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
@@ -1047,19 +1112,20 @@ async def api_repo_branch_latest_worst_files(
 
 
 @app.get(
-    "/api/{owner}/{name}/b/{branch:path}/latest/uncovered-lines", dependencies=_authn
+    "/api/{provider}/{owner}/{name}/b/{branch:path}/latest/uncovered-lines", dependencies=_authn
 )
 async def api_repo_branch_latest_uncovered_lines(
-    owner: str, name: str, branch: str, limit: int = DEFAULT_PIE_FILES
+    provider: str, owner: str, name: str, branch: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 200))
 
-    head_hash = await db.latest_branch_head_hash(repo_full, branch)
+    head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
     if head_hash is None:
         return JSONResponse({"latest": None, "files": []})
 
-    row = await db.latest_report_for_repo_hash(repo_full, head_hash)
+    row = await db.latest_report_for_repo_hash(provider_id, repo_full, head_hash)
     if row is None:
         return JSONResponse({"latest": None, "files": []})
 
