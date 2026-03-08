@@ -660,6 +660,7 @@ def dashboard_html_for(
             branches=branches or [],
             branches_base_url=branches_base_url,
             current_branch="",
+            repo_name=name,
         )
     else:
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
@@ -683,6 +684,7 @@ def dashboard_html_for(
             branches=branches or [],
             branches_base_url=branches_base_url,
             current_branch=ref,
+            repo_name=name,
         )
 
 
