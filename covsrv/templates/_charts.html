@@ -31,7 +31,7 @@ window.renderTrendChart = function(id, labels, values) {
     plugins: [{
       beforeInit: function(chart) {
         var h = chart.canvas.parentElement.clientHeight;
-        chart.options.layout.padding.top = Math.round(h * 0.15);
+        chart.options.layout.padding.top = Math.round(h * 0.22);
       }
     }],
     options: {
@@ -176,7 +176,7 @@ window.renderFileCoverageBar = function(id, labels, values) {
     plugins: [{
       beforeInit: function(chart) {
         var h = chart.canvas.parentElement.clientHeight;
-        chart.options.layout.padding.top = Math.round(h * 0.15);
+        chart.options.layout.padding.top = Math.round(h * 0.22);
       }
     }],
     options: {
