@@ -200,6 +200,21 @@ async def latest_branch_head_hash(
         return None if row is None else str(row[0])
 
 
+async def branches_for_repo(provider_id: str, repo: str) -> list[str]:
+    """Return all known branch names for a repo, ordered alphabetically."""
+    async with session() as sess:
+        stmt = (
+            select(BranchHead.branch_name)
+            .where(
+                BranchHead.provider_id == provider_id,
+                BranchHead.repo == repo,
+            )
+            .order_by(BranchHead.branch_name.asc())
+        )
+        result = await sess.execute(stmt)
+        return [str(row[0]) for row in result.all()]
+
+
 async def branch_events_for(
     provider_id: str, repo: str, branch_name: str, limit: int
 ) -> list[dict[str, Any]]:

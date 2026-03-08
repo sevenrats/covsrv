@@ -629,10 +629,12 @@ def dashboard_html_for(
     repo_full: str,
     ref: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
+    branches: list[str] | None = None,
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
     github_url = f"{base}/{owner}/{name}"
+    branches_base_url = f"/{provider_name}/{owner}/{name}"
 
     if kind == "h":
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
@@ -655,6 +657,9 @@ def dashboard_html_for(
             worst_limit=DEFAULT_WORST_FILES,
             github_url=github_url,
             raw_framed_url=raw_framed_url,
+            branches=branches or [],
+            branches_base_url=branches_base_url,
+            current_branch="",
         )
     else:
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
@@ -675,6 +680,9 @@ def dashboard_html_for(
             pie_limit=DEFAULT_PIE_FILES,
             github_url=github_url,
             raw_framed_url=raw_framed_url,
+            branches=branches or [],
+            branches_base_url=branches_base_url,
+            current_branch=ref,
         )
 
 
@@ -759,12 +767,14 @@ async def repo_branch_dashboard(
     if head_hash:
         row = await db.latest_report_for_repo_hash(provider_id, repo_full, head_hash)
     provider_url = _resolve_provider_url(provider, row)
+    branches = await db.branches_for_repo(provider_id, repo_full)
     return dashboard_html_for(
         "b",
         provider,
         repo_full,
         branch,
         provider_url=provider_url,
+        branches=branches,
     )
 
 
@@ -877,12 +887,14 @@ async def repo_hash_chart(
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
     provider_url = _resolve_provider_url(provider, row)
+    branches = await db.branches_for_repo(provider_id, repo_full)
     return dashboard_html_for(
         "h",
         provider,
         repo_full,
         git_hash,
         provider_url=provider_url,
+        branches=branches,
     )
 
 
