@@ -1,0 +1,12 @@
+{#- Reusable card wrapper.
+
+    Import:  {% from '_card.html' import card %}
+    Call:    {% call card('Title') %}…{% endcall %}
+-#}
+
+{% macro card(title='') %}
+<div class="card">
+  {% if title %}<h2>{{ title }}</h2>{% endif %}
+  {{ caller() }}
+</div>
+{% endmacro %}

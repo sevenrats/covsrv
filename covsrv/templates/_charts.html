@@ -1,0 +1,161 @@
+{#- Reusable Chart.js chart macros.
+
+    Import:  {% from '_charts.html' import trend_chart, uncovered_pie,
+                                           coverage_gauge, file_coverage_bar %}
+
+    Each macro renders:
+      1. A <div class="chart-box"><canvas> wrapper
+      2. A <script> defining a window.render* function
+
+    The page script fetches data and calls the render function.
+-#}
+
+
+{# ── Timeline line chart (branch view) ────────────────────────────── #}
+
+{% macro trend_chart(canvas_id='trendChart') %}
+<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
+<script>
+window.renderTrendChart = function(id, labels, values) {
+  new Chart(document.getElementById(id), {
+    type: "line",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "Overall % covered",
+        data: values,
+        tension: 0.2,
+        borderColor: "rgb(75, 192, 192)",
+        backgroundColor: "rgba(75, 192, 192, 0.1)",
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: { y: { min: 0, max: 100 } }
+    }
+  });
+};
+</script>
+{% endmacro %}
+
+
+{# ── Uncovered-lines pie chart (both views) ───────────────────────── #}
+
+{% macro uncovered_pie(canvas_id='uncoveredPie', list_id='uncoveredList') %}
+<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
+<ol id="{{ list_id }}" class="uncovered-list"></ol>
+<script>
+window.renderUncoveredPie = function(id, listId, labels, values, fullNames) {
+  new Chart(document.getElementById(id), {
+    type: "pie",
+    data: {
+      labels: labels,
+      datasets: [{ label: "Uncovered lines", data: values }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false
+    }
+  });
+
+  var ulist = document.getElementById(listId);
+  if (!ulist) return;
+  ulist.innerHTML = "";
+  for (var i = 0; i < fullNames.length; i++) {
+    var li = document.createElement("li");
+    li.textContent = fullNames[i] + " \u2014 " + values[i] + " lines";
+    ulist.appendChild(li);
+  }
+};
+</script>
+{% endmacro %}
+
+
+{# ── Coverage gauge / donut (hash view) ───────────────────────────── #}
+
+{% macro coverage_gauge(canvas_id='coverageGauge') %}
+<div class="chart-box" style="position:relative;">
+  <canvas id="{{ canvas_id }}"></canvas>
+  <div id="{{ canvas_id }}Label" class="gauge-label">
+    <div class="gauge-value">&mdash;</div>
+    <div class="gauge-caption">coverage</div>
+  </div>
+</div>
+<script>
+window.renderCoverageGauge = function(id, percent) {
+  var color;
+  if (percent < 50)      color = "#e05d44";
+  else if (percent < 75) color = "#fe7d37";
+  else if (percent < 90) color = "#dfb317";
+  else                   color = "#4c1";
+
+  new Chart(document.getElementById(id), {
+    type: "doughnut",
+    data: {
+      labels: ["Covered", "Uncovered"],
+      datasets: [{
+        data: [percent, 100 - percent],
+        backgroundColor: [color, "#f0f0f0"],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: "75%",
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: true }
+      }
+    }
+  });
+
+  var label = document.getElementById(id + "Label");
+  if (label) {
+    label.querySelector(".gauge-value").textContent = percent.toFixed(1) + "%";
+    label.querySelector(".gauge-value").style.color = color;
+  }
+};
+</script>
+{% endmacro %}
+
+
+{# ── Per-file coverage horizontal bar (hash view) ─────────────────── #}
+
+{% macro file_coverage_bar(canvas_id='fileCoverageBar') %}
+<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
+<script>
+window.renderFileCoverageBar = function(id, labels, values) {
+  new Chart(document.getElementById(id), {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [{
+        label: "% covered",
+        data: values,
+        backgroundColor: values.map(function(v) {
+          if (v < 50)      return "rgba(224, 93, 68, 0.7)";
+          if (v < 75)      return "rgba(254, 125, 55, 0.7)";
+          if (v < 90)      return "rgba(223, 179, 23, 0.7)";
+          return "rgba(68, 204, 17, 0.7)";
+        }),
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: "y",
+      scales: {
+        x: { min: 0, max: 100, title: { display: true, text: "Coverage %" } }
+      },
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+};
+</script>
+{% endmacro %}

@@ -1,0 +1,108 @@
+{#- Branch dashboard – timeline trend + uncovered-lines pie.
+
+    Extends _base.html and uses component macros for navbar, card, and charts.
+
+    Context variables (set by dashboard_html_for):
+      github_url, raw_url, trend_url, uncovered_url,
+      download_suffix, trend_limit, pie_limit, raw_framed_url
+-#}
+{% extends '_base.html' %}
+
+{% block title %}Coverage{% endblock %}
+
+{% block head %}
+  {% from '_dashboard_styles.html' import dashboard_css %}
+  {{ dashboard_css() }}
+{% endblock %}
+
+{% block body %}
+  {% from '_navbar.html' import navbar %}
+  {% from '_card.html' import card %}
+  {% from '_charts.html' import trend_chart, uncovered_pie %}
+
+  {{ navbar(
+      github_url=github_url,
+      extra_buttons_html='<a class="nav-btn" id="spreadsheetBtn" href="' ~ (raw_framed_url if raw_framed_url else '#') ~ '" title="Report"' ~ (' style="display:none"' if not raw_framed_url) ~ '><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg></a>'
+  ) }}
+
+  <div class="content">
+    <div class="top">
+      <h1 style="margin:0;">Coverage</h1>
+      <span class="pill" id="latestMeta">Loading latest…</span>
+    </div>
+
+    <div class="muted-row">
+      <span>
+        Uncovered-lines are from the latest report for this ref. Trend is historical.
+      </span>
+      <a class="btn" href="/download/json{{ download_suffix }}" download="coverage.json">JSON</a>
+      <a class="btn" href="/download/lcov{{ download_suffix }}" download="coverage.lcov">LCOV</a>
+      <a class="btn" href="/download/xml{{ download_suffix }}" download="coverage.xml">XML</a>
+    </div>
+
+    <div class="grid">
+      {% call card('Overall coverage trend') %}
+        {{ trend_chart('trendChart') }}
+      {% endcall %}
+
+      {% call card('Uncovered lines by file (latest)') %}
+        {{ uncovered_pie('uncoveredPie', 'uncoveredList') }}
+      {% endcall %}
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    function tsToLabel(ts) {
+      return new Date(ts * 1000).toLocaleString();
+    }
+
+    function shorten(path) {
+      if (!path) return path;
+      if (path.length <= 40) return path;
+      return "\u2026" + path.slice(path.length - 39);
+    }
+
+    (async function main() {
+      const [trendRes, uncoveredRes] = await Promise.all([
+        fetch("{{ trend_url }}?limit={{ trend_limit }}"),
+        fetch("{{ uncovered_url }}?limit={{ pie_limit }}")
+      ]);
+      const trend = await trendRes.json();
+      const uncovered = await uncoveredRes.json();
+
+      /* metadata pill */
+      const meta = document.getElementById("latestMeta");
+      const latest = uncovered && uncovered.latest ? uncovered.latest : null;
+      if (latest) {
+        const rawUrl = "{{ raw_url }}" + latest.git_hash;
+        meta.innerHTML =
+          "Latest: " + latest.repo + " @ " +
+          '<a href="' + rawUrl + '">' + latest.git_hash + "</a> \u00b7 " +
+          latest.overall_percent.toFixed(2) + "% \u00b7 " +
+          tsToLabel(latest.received_ts);
+        const btn = document.getElementById("spreadsheetBtn");
+        if (btn && btn.style.display === "none") {
+          btn.href = rawUrl;
+          btn.style.display = "";
+        }
+      } else {
+        meta.textContent = "No reports yet.";
+      }
+
+      /* trend line chart */
+      const tlabels = (trend.points || []).map(function(p) { return tsToLabel(p.received_ts); });
+      const tvals   = (trend.points || []).map(function(p) { return p.overall_percent; });
+      window.renderTrendChart("trendChart", tlabels, tvals);
+
+      /* uncovered-lines pie */
+      const files     = uncovered.files || [];
+      const plabels   = files.map(function(x) { return shorten(x.filename); });
+      const pvals     = files.map(function(x) { return x.uncovered_lines; });
+      const fullNames = files.map(function(x) { return x.filename; });
+      window.renderUncoveredPie("uncoveredPie", "uncoveredList", plabels, pvals, fullNames);
+    })();
+  </script>
+{% endblock %}
