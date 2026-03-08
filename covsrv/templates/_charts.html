@@ -6,7 +6,7 @@
 <!-- ── Timeline line chart (branch view) ──────────────────────────── -->
 
 {% macro trend_chart(canvas_id='trendChart') %}
-<div class="chart-box" style="display:flex;align-items:center;justify-content:center;"><canvas id="{{ canvas_id }}"></canvas></div>
+<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
 <script>
 window.renderTrendChart = function(id, labels, values) {
   var cs = getComputedStyle(document.documentElement);
@@ -31,6 +31,7 @@ window.renderTrendChart = function(id, labels, values) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: { padding: { top: 24 } },
       scales: {
         y: { min: 0, max: 100 },
         x: { ticks: { maxRotation: 45 } }
@@ -141,7 +142,7 @@ window.renderCoverageGauge = function(id, percent) {
 <!-- ── Per-file coverage horizontal bar (hash view) ───────────────── -->
 
 {% macro file_coverage_bar(canvas_id='fileCoverageBar') %}
-<div class="chart-box" style="display:flex;align-items:center;justify-content:center;"><canvas id="{{ canvas_id }}"></canvas></div>
+<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
 <script>
 window.renderFileCoverageBar = function(id, labels, values) {
   var cs = getComputedStyle(document.documentElement);
@@ -170,6 +171,7 @@ window.renderFileCoverageBar = function(id, labels, values) {
       responsive: true,
       maintainAspectRatio: false,
       indexAxis: "y",
+      layout: { padding: { top: 24 } },
       scales: {
         x: { min: 0, max: 100, title: { display: true, text: "Coverage %" } }
       },
