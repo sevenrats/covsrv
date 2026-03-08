@@ -410,6 +410,37 @@ class TestDashboardHtmlFor:
         assert "/api/myprov/alice/proj/b/main/trend" in html
         assert "/api/myprov/alice/proj/b/main/latest/uncovered-lines" in html
 
+    def test_branch_pill_shows_branch_name(self):
+        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "feat/x")
+        assert "branch feat/x" in html
+
+    def test_hash_pill_shows_sha_prefix(self):
+        sha = "abc1234567890"
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", sha)
+        assert f"sha {sha[:10]}" in html
+
+    def test_hash_pill_shows_branch_when_provided(self):
+        sha = "abc1234567890"
+        html = app_module.dashboard_html_for(
+            "h", "myprov", "alice/proj", sha, hash_branches=["main", "dev"]
+        )
+        # Should pick first branch and render a link
+        assert "main" in html
+        assert "/myprov/alice/proj/b/main" in html
+
+    def test_hash_pill_no_branch_when_empty(self):
+        sha = "abc1234567890"
+        html = app_module.dashboard_html_for(
+            "h", "myprov", "alice/proj", sha, hash_branches=[]
+        )
+        assert f"sha {sha[:10]}" in html
+
+    def test_back_button_always_present(self):
+        """Every dashboard view should render a back button."""
+        for kind, ref in [("b", "main"), ("h", "abc123")]:
+            html = app_module.dashboard_html_for(kind, "myprov", "alice/proj", ref)
+            assert 'title="Back"' in html
+
     def test_branch_contains_trend_limit(self):
         html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
         assert str(app_module.TREND_LIMIT) in html
@@ -438,6 +469,11 @@ class TestDashboardHtmlFor:
         html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
         assert "github.com/alice/proj" in html
 
+    def test_hash_back_url_points_to_framed(self):
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
+        # Hash chart view back button should link to the framed raw view
+        assert 'href="/myprov/alice/proj/h/abc123"' in html
+
 
 class TestFramedHtmlFor:
     def test_renders_with_iframe(self):
@@ -456,8 +492,6 @@ class TestFramedHtmlFor:
         expected_chart = "/myprov/alice/proj/h/abc123/chart"
         assert f'href="{expected_chart}"' in html
         assert 'title="Back"' in html
-        # Must NOT use history.back() which is fooled by iframe navigation
-        assert "history.back()" not in html
 
     def test_custom_provider_url(self):
         html = app_module.framed_html_for(

@@ -124,6 +124,10 @@
   <a class="nav-btn" href="{{ back_url }}" title="Back">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
   </a>
+  {% else %}
+  <button class="nav-btn" id="backBtn" title="Back" type="button" onclick="history.back()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
   {% endif %}
   {% if branches %}
   <div class="branch-dropdown">

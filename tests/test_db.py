@@ -216,6 +216,65 @@ class TestLatestBranchHeadHash:
 
 
 # -----------------------------------------------------------------------
+# branches_for_hash
+# -----------------------------------------------------------------------
+
+
+class TestBranchesForHash:
+    async def test_empty(self, initialized_db):
+        result = await db.branches_for_hash("prov", "owner/repo", "nonexistent")
+        assert result == []
+
+    async def test_returns_matching_branches(self, initialized_db):
+        async with db.session() as sess:
+            sess.add(
+                BranchHead(
+                    provider_id="prov",
+                    repo="owner/repo",
+                    branch_name="main",
+                    current_hash="abc1234567",
+                    updated_ts=1000,
+                )
+            )
+            sess.add(
+                BranchHead(
+                    provider_id="prov",
+                    repo="owner/repo",
+                    branch_name="dev",
+                    current_hash="abc1234567",
+                    updated_ts=1001,
+                )
+            )
+            sess.add(
+                BranchHead(
+                    provider_id="prov",
+                    repo="owner/repo",
+                    branch_name="other",
+                    current_hash="zzz9999999",
+                    updated_ts=1002,
+                )
+            )
+
+        result = await db.branches_for_hash("prov", "owner/repo", "abc1234567")
+        assert result == ["dev", "main"]  # alphabetical
+
+    async def test_ignores_other_repos(self, initialized_db):
+        async with db.session() as sess:
+            sess.add(
+                BranchHead(
+                    provider_id="prov",
+                    repo="other/repo",
+                    branch_name="main",
+                    current_hash="abc1234567",
+                    updated_ts=1000,
+                )
+            )
+
+        result = await db.branches_for_hash("prov", "owner/repo", "abc1234567")
+        assert result == []
+
+
+# -----------------------------------------------------------------------
 # branch_events_for
 # -----------------------------------------------------------------------
 

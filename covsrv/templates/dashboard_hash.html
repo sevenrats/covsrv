@@ -35,7 +35,13 @@
   <div class="content">
     <div class="top">
       <h1 style="margin:0;">{{ repo_name }}</h1>
-      <span class="pill" id="latestMeta">Loading…</span>
+      <span class="pill" id="latestMeta">
+        {%- if hash_branch -%}
+          sha {{ git_ref[:10] }} · <a href="{{ branches_base_url }}/b/{{ hash_branch }}">{{ hash_branch }}</a>
+        {%- else -%}
+          sha {{ git_ref[:10] }}
+        {%- endif -%}
+      </span>
     </div>
 
     <div class="muted-row">
@@ -86,11 +92,16 @@
       if (latest) {
         const rawUrl = "{{ raw_url }}" + latest.git_hash;
         const chartUrl = rawUrl + "/chart";
-        meta.innerHTML =
-          latest.repo + " @ " +
-          '<a href="' + chartUrl + '">' + latest.git_hash + "</a> \u00b7 " +
+        var pillText = "sha " +
+          '<a href="' + chartUrl + '">' + latest.git_hash.slice(0, 10) + "</a>";
+        {% if hash_branch %}
+        pillText += " \u00b7 " +
+          '<a href="{{ branches_base_url }}/b/{{ hash_branch }}">{{ hash_branch }}</a>';
+        {% endif %}
+        pillText += " \u00b7 " +
           latest.overall_percent.toFixed(2) + "% \u00b7 " +
           tsToLabel(latest.received_ts);
+        meta.innerHTML = pillText;
         const btn = document.getElementById("spreadsheetBtn");
         if (btn && btn.style.display === "none") {
           btn.href = rawUrl;

@@ -215,6 +215,22 @@ async def branches_for_repo(provider_id: str, repo: str) -> list[str]:
         return [str(row[0]) for row in result.all()]
 
 
+async def branches_for_hash(provider_id: str, repo: str, git_hash: str) -> list[str]:
+    """Return branch names whose current head matches *git_hash*."""
+    async with session() as sess:
+        stmt = (
+            select(BranchHead.branch_name)
+            .where(
+                BranchHead.provider_id == provider_id,
+                BranchHead.repo == repo,
+                BranchHead.current_hash == git_hash,
+            )
+            .order_by(BranchHead.branch_name.asc())
+        )
+        result = await sess.execute(stmt)
+        return [str(row[0]) for row in result.all()]
+
+
 async def branch_events_for(
     provider_id: str, repo: str, branch_name: str, limit: int
 ) -> list[dict[str, Any]]:

@@ -31,7 +31,7 @@
   <div class="content">
     <div class="top">
       <h1 style="margin:0;">{{ repo_name }}</h1>
-      <span class="pill" id="latestMeta">Loading latest…</span>
+      <span class="pill" id="latestMeta">branch {{ current_branch }}</span>
     </div>
 
     <div class="muted-row">
@@ -83,8 +83,8 @@
         const rawUrl = "{{ raw_url }}" + latest.git_hash;
         const chartUrl = rawUrl + "/chart";
         meta.innerHTML =
-          "Latest: " + latest.repo + " @ " +
-          '<a href="' + chartUrl + '">' + latest.git_hash + "</a> \u00b7 " +
+          "branch {{ current_branch }} @ " +
+          '<a href="' + chartUrl + '">' + latest.git_hash.slice(0, 10) + "</a> \u00b7 " +
           latest.overall_percent.toFixed(2) + "% \u00b7 " +
           tsToLabel(latest.received_ts);
         const btn = document.getElementById("spreadsheetBtn");

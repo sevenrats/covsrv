@@ -630,6 +630,7 @@ def dashboard_html_for(
     ref: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
     branches: list[str] | None = None,
+    hash_branches: list[str] | None = None,
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
@@ -646,6 +647,8 @@ def dashboard_html_for(
         )
         download_suffix = f"/{provider_name}/{owner}/{name}/h/{ref}"
         raw_framed_url = f"/{provider_name}/{owner}/{name}/h/{ref}"
+        # Pick the first branch whose head matches this hash (if any).
+        hash_branch = (hash_branches or [""])[0] if hash_branches else ""
 
         template = _jinja_env.get_template("dashboard_hash.html")
         return template.render(
@@ -661,6 +664,8 @@ def dashboard_html_for(
             branches_base_url=branches_base_url,
             current_branch="",
             repo_name=name,
+            git_ref=ref,
+            hash_branch=hash_branch,
         )
     else:
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
@@ -897,6 +902,7 @@ async def repo_hash_chart(
     row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
     provider_url = _resolve_provider_url(provider, row)
     branches = await db.branches_for_repo(provider_id, repo_full)
+    hash_branches = await db.branches_for_hash(provider_id, repo_full, git_hash)
     return dashboard_html_for(
         "h",
         provider,
@@ -904,6 +910,7 @@ async def repo_hash_chart(
         git_hash,
         provider_url=provider_url,
         branches=branches,
+        hash_branches=hash_branches,
     )
 
 
