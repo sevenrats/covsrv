@@ -43,7 +43,7 @@ window.renderTrendChart = function(id, points, rawUrlBase) {
       maintainAspectRatio: false,
       layout: { padding: { top: 0 } },
       scales: {
-        y: { min: 0, max: 100, display: false },
+        y: { min: 0, max: 100, display: true, grid: { display: true }, ticks: { stepSize: 25 } },
         x: { display: false }
       },
       plugins: {
