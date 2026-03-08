@@ -1,12 +1,4 @@
-{#- Reusable navbar macro.
-
-    Import:  {% from '_navbar.html' import navbar %}
-    Call:    {{ navbar(github_url=github_url) }}
-
-    extra_buttons_html: raw HTML for page-specific buttons rendered
-    before the repository link.
--#}
-
+<!-- Reusable navbar macro.  Colors come from _theme.html variables. -->
 {% macro navbar(github_url='', extra_buttons_html='') %}
 <style>
   .navbar {
@@ -14,28 +6,28 @@
     align-items: center;
     padding: 8px 16px;
     gap: 10px;
-    background: #fafafa;
-    border-bottom: 1px solid #e2e2e2;
+    background: var(--clr-nav-bg);
+    border-bottom: 1px solid var(--clr-nav-border);
   }
 
   .nav-btn {
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    border: 1px solid #e2e2e2;
-    background: white;
+    border: 1px solid var(--clr-nav-border);
+    background: var(--clr-nav-btn-bg);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     text-decoration: none;
-    color: #333;
+    color: var(--clr-nav-text);
     transition: all 0.15s ease;
     cursor: pointer;
   }
 
   .nav-btn:hover {
-    background: #f0f0f0;
-    border-color: #d0d0d0;
+    background: var(--clr-nav-btn-hover);
+    border-color: var(--clr-text-faint);
   }
 
   .nav-btn svg {
@@ -54,10 +46,10 @@
     position: absolute;
     right: 0;
     top: 40px;
-    background: white;
-    border: 1px solid #e2e2e2;
+    background: var(--clr-surface);
+    border: 1px solid var(--clr-border);
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 12px var(--clr-shadow);
     min-width: 180px;
     z-index: 100;
     padding: 4px 0;
@@ -69,17 +61,17 @@
     display: block;
     padding: 8px 14px;
     font-size: 13px;
-    color: #333;
+    color: var(--clr-text);
     text-decoration: none;
     white-space: nowrap;
   }
 
   .context-menu a:hover {
-    background: #f5f5f5;
+    background: var(--clr-surface-alt);
   }
 
   .context-menu .sep {
-    border-top: 1px solid #e8e8e8;
+    border-top: 1px solid var(--clr-border);
     margin: 4px 0;
   }
 </style>

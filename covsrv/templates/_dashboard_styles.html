@@ -1,15 +1,7 @@
-{#- Shared CSS for dashboard pages (branch + hash).
-
-    Import:  {% from '_dashboard_styles.html' import dashboard_css %}
-    Usage:   {{ dashboard_css() }}
--#}
-
+<!-- Shared CSS for dashboard pages (branch + hash).
+     Colors reference _theme.html custom-properties. -->
 {% macro dashboard_css() %}
 <style>
-  :root {
-    --chart-h: 360px;
-  }
-
   .content {
     padding: 24px 40px;
   }
@@ -24,8 +16,13 @@
   .pill {
     padding: 6px 12px;
     border-radius: 999px;
-    background: #f2f2f2;
+    background: var(--clr-pill-bg);
+    color: var(--clr-pill-text);
     font-size: 14px;
+  }
+
+  .pill a {
+    color: var(--clr-accent);
   }
 
   .muted-row {
@@ -34,25 +31,25 @@
     flex-wrap: wrap;
     align-items: flex-end;
     gap: 14px;
-    color: #666;
+    color: var(--clr-text-muted);
     font-size: 14px;
   }
 
   .btn {
     padding: 4px 10px;
     border-radius: 6px;
-    border: 1px solid #e2e2e2;
-    background: #fafafa;
+    border: 1px solid var(--clr-btn-border);
+    background: var(--clr-btn-bg);
     font-size: 12px;
     line-height: 1.2;
     text-decoration: none;
     transition: all 0.15s ease;
-    color: #333;
+    color: var(--clr-text);
   }
 
   .btn:hover {
-    background: #f0f0f0;
-    border-color: #d0d0d0;
+    background: var(--clr-btn-hover-bg);
+    border-color: var(--clr-btn-hover-bdr);
   }
 
   .grid {
@@ -70,16 +67,17 @@
   }
 
   .card {
-    border: 1px solid #e7e7e7;
+    border: 1px solid var(--clr-border);
     border-radius: 18px;
     padding: 20px;
-    background: white;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    background: var(--clr-surface);
+    box-shadow: 0 1px 3px var(--clr-shadow);
   }
 
   .card h2 {
     margin: 0 0 16px 0;
     font-size: 18px;
+    color: var(--clr-text);
   }
 
   .chart-box {
@@ -98,6 +96,7 @@
     max-height: 160px;
     overflow-y: auto;
     font-size: 14px;
+    color: var(--clr-text-muted);
   }
 
   .gauge-label {
@@ -116,8 +115,10 @@
 
   .gauge-caption {
     font-size: 14px;
-    color: #888;
+    color: var(--clr-text-faint);
     margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 </style>
 {% endmacro %}

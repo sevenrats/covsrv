@@ -1,26 +1,32 @@
-{#- Base layout shared by every page.
-
-    Blocks:
-      title   – <title> text  (default: "Coverage")
-      head    – extra <style>/<link> tags
-      body    – page body content
-      scripts – extra <script> tags (bottom of body)
--#}
 <!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{% block title %}Coverage{% endblock %}</title>
+    {% from '_theme.html' import theme_vars %}
+    {{ theme_vars() }}
     <style>
+      *,
+      *::before,
+      *::after { box-sizing: border-box; }
+
       body {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
         margin: 0;
         padding: 0;
-        box-sizing: border-box;
+        background: var(--clr-bg);
+        color: var(--clr-text);
       }
 
-      a { color: inherit; text-decoration: underline; }
+      a {
+        color: var(--clr-accent);
+        text-decoration: underline;
+      }
+
+      a:hover {
+        color: var(--clr-accent-hover);
+      }
     </style>
     {% block head %}{% endblock %}
   </head>
