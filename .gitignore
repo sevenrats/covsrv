@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 covsrv_data
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

@@ -1,8 +1,17 @@
 # syntax=docker/dockerfile:1.7
 
+# ── Stage 1: Build React frontend ─────────────────────────────────
+FROM node:20-alpine AS frontend
+
+WORKDIR /app/frontend
+COPY frontend/package.json ./
+RUN npm install
+COPY frontend/ .
+RUN npm run build
+
+# ── Stage 2: Python runtime ───────────────────────────────────────
 FROM python:3.12-alpine AS runtime
 
-# Copy uv binary
 COPY --from=docker.io/astral/uv:latest /uv /uvx /bin/
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,7 +25,6 @@ COPY pyproject.toml ./
 COPY uv.lock* ./
 
 # ---- System dependencies (build + runtime) ----
-# build-base needed for compiling some wheels on musl
 RUN apk add --no-cache \
         build-base \
         libffi-dev \
@@ -28,8 +36,11 @@ RUN apk add --no-cache \
     && pip install --no-cache-dir -r requirements.txt \
     && apk del build-base cargo libffi-dev openssl-dev
 
-# ---- App layer (fast-changing) ----
+# ---- App layer ----
 COPY . .
+
+# ---- Inject built frontend ----
+COPY --from=frontend /app/frontend/dist /app/frontend/dist
 
 EXPOSE 8000
 

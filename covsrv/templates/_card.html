@@ -1,7 +1,0 @@
-<!-- Reusable card wrapper macro. -->
-{% macro card(title='') %}
-<div class="card">
-  {% if title %}<h2>{{ title }}</h2>{% endif %}
-  {{ caller() }}
-</div>
-{% endmacro %}

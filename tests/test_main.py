@@ -388,164 +388,6 @@ class TestParseCoverageXml:
         assert files == []
 
 
-# -----------------------------------------------------------------------
-# dashboard helpers
-# -----------------------------------------------------------------------
-
-
-class TestDashboardHtmlFor:
-    def test_hash_kind(self):
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
-        assert "/api/myprov/alice/proj/h/abc123/latest/uncovered-lines" in html
-        assert "/api/myprov/alice/proj/h/abc123/latest/worst-files" in html
-        assert "/download/" in html  # download links present
-        # Hash view should NOT contain a trend URL (no timeline)
-        assert "/api/myprov/alice/proj/h/abc123/trend" not in html
-        # Verify no raw Jinja2 placeholders remain
-        assert "{{" not in html
-        assert "}}" not in html
-
-    def test_branch_kind(self):
-        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
-        assert "/api/myprov/alice/proj/b/main/trend" in html
-        assert "/api/myprov/alice/proj/b/main/latest/uncovered-lines" in html
-
-    def test_branch_pill_in_navbar(self):
-        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "feat/x")
-        assert "branch feat/x" in html
-        assert "nav-pill" in html
-
-    def test_hash_pill_in_navbar(self):
-        sha = "abc1234567890"
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", sha)
-        assert f"sha {sha[:10]}" in html
-        assert "nav-pill" in html
-
-    def test_hash_pill_shows_branch_when_provided(self):
-        sha = "abc1234567890"
-        html = app_module.dashboard_html_for(
-            "h", "myprov", "alice/proj", sha, hash_branches=["main", "dev"]
-        )
-        # Should pick first branch and render a link
-        assert "main" in html
-        assert "/myprov/alice/proj/b/main" in html
-
-    def test_hash_pill_no_branch_when_empty(self):
-        sha = "abc1234567890"
-        html = app_module.dashboard_html_for(
-            "h", "myprov", "alice/proj", sha, hash_branches=[]
-        )
-        assert f"sha {sha[:10]}" in html
-
-    def test_back_button_always_present(self):
-        """Every dashboard view should render a back button."""
-        for kind, ref in [("b", "main"), ("h", "abc123")]:
-            html = app_module.dashboard_html_for(kind, "myprov", "alice/proj", ref)
-            assert 'title="Back"' in html
-
-    def test_branch_contains_trend_limit(self):
-        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
-        assert str(app_module.TREND_LIMIT) in html
-
-    def test_hash_contains_worst_limit(self):
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
-        assert str(app_module.DEFAULT_WORST_FILES) in html
-
-    def test_hash_contains_nav_urls(self):
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
-        assert "github.com/alice/proj" in html
-        assert "/myprov/alice/proj/h/abc123" in html  # raw_framed_url
-
-    def test_download_row_present(self):
-        for kind, ref in [("b", "main"), ("h", "abc123")]:
-            html = app_module.dashboard_html_for(kind, "myprov", "alice/proj", ref)
-            assert "download-row" in html
-            assert "/download/json" in html
-            assert "/download/lcov" in html
-            assert "/download/xml" in html
-
-    def test_no_muted_row_subtitle(self):
-        for kind, ref in [("b", "main"), ("h", "abc123")]:
-            html = app_module.dashboard_html_for(kind, "myprov", "alice/proj", ref)
-            assert "muted-row" not in html
-            assert "Uncovered-lines are from" not in html
-            assert "Coverage snapshot for a single" not in html
-
-    def test_custom_provider_url(self):
-        html = app_module.dashboard_html_for(
-            "h", "myprov", "alice/proj", "abc123", provider_url="https://gitlab.com"
-        )
-        assert "gitlab.com/alice/proj" in html
-        assert "github.com" not in html
-
-    def test_default_provider_url(self):
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
-        assert "github.com/alice/proj" in html
-
-    def test_hash_back_url_points_to_framed(self):
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
-        # Hash chart view back button should link to the framed raw view
-        assert 'href="/myprov/alice/proj/h/abc123"' in html
-
-
-class TestFramedHtmlFor:
-    def test_renders_with_iframe(self):
-        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
-        assert "iframe" in html
-        assert "/raw/myprov/alice/proj/h/abc123/" in html
-        assert "github.com/alice/proj" in html
-        assert "/myprov/alice/proj/h/abc123/chart" in html
-        assert "{{" not in html
-        assert "}}" not in html
-
-    def test_back_button_links_to_chart(self):
-        """The back button must be an anchor linking to the chart URL so it
-        navigates the outer page, not the iframe history."""
-        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
-        expected_chart = "/myprov/alice/proj/h/abc123/chart"
-        assert f'href="{expected_chart}"' in html
-        assert 'title="Back"' in html
-
-    def test_custom_provider_url(self):
-        html = app_module.framed_html_for(
-            "myprov", "alice/proj", "abc123", provider_url="https://gitlab.com"
-        )
-        assert "gitlab.com/alice/proj" in html
-        assert "github.com" not in html
-
-    def test_loading_overlay_hidden_by_default(self):
-        """The overlay must start with display:none so it is invisible when
-        there is no ``?file=`` query parameter.  A previous bug had both
-        ``display:none`` and ``display:flex`` in the same style attribute,
-        causing the overlay to always show."""
-        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
-        # Extract the inline style of the loadingOverlay div
-        import re
-
-        m = re.search(r'id="loadingOverlay"\s+style="([^"]*)"', html)
-        assert m, "loadingOverlay div not found in rendered HTML"
-        style = m.group(1)
-        # There must be exactly one display declaration and it must be 'none'
-        declarations = [
-            d.strip() for d in style.split(";") if d.strip().startswith("display")
-        ]
-        assert len(declarations) == 1, (
-            f"Expected exactly 1 display declaration, got {declarations}"
-        )
-        assert declarations[0] == "display:none", (
-            f"Overlay should default to display:none, got '{declarations[0]}'"
-        )
-
-    def test_overlay_activated_by_js_only_with_file_param(self):
-        """The JS must only flip the overlay to display:flex when ?file= is
-        present (the ``if (!targetFile) return;`` guard)."""
-        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
-        # The script must early-return when there is no file param
-        assert "if (!targetFile) return;" in html
-        # And only after the guard does it set display to flex
-        assert 'overlay.style.display = "flex"' in html
-
-
 # =====================================================================
 # Integration tests — HTTP endpoints (need DB + client)
 # =====================================================================
@@ -635,102 +477,36 @@ async def seed_report(
 
 
 # -----------------------------------------------------------------------
-# Root
-# -----------------------------------------------------------------------
-
-
-class TestRootEndpoint:
-    async def test_redirects_to_docs(self, client: AsyncClient):
-        resp = await client.get("/", follow_redirects=False)
-        assert resp.status_code in (301, 302, 307, 308)
-        assert "/docs" in resp.headers["location"]
-
-
-# -----------------------------------------------------------------------
-# Repo home
-# -----------------------------------------------------------------------
-
-
-class TestRepoHome:
-    async def test_redirects_to_branch_main(self, client: AsyncClient):
-        resp = await client.get("/gh/alice/proj/", follow_redirects=False)
-        assert resp.status_code in (301, 302, 307, 308)
-        assert "/gh/alice/proj/b/main" in resp.headers["location"]
-
-
-# -----------------------------------------------------------------------
-# Branch dashboard
-# -----------------------------------------------------------------------
-
-
-class TestBranchDashboard:
-    async def test_returns_html(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get("/gh/alice/proj/b/main")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Coverage" in resp.text
-
-    async def test_uses_provider_url_from_report(
-        self, client: AsyncClient, tmp_data_dir
-    ):
-        await seed_report(
-            tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh"
-        )
-        resp = await client.get("/gh/alice/proj/b/main")
-        assert resp.status_code == 200
-        assert "gitlab.com/alice/proj" in resp.text
-
-
-# -----------------------------------------------------------------------
-# Hash raw views
+# SPA catch-all (replaces old Jinja route tests)
 # -----------------------------------------------------------------------
 
 
 SHA = "abc1234567890abcdef1234567890abcdef123456"
 
 
-class TestHashFramedView:
-    async def test_returns_framed_html(self, client: AsyncClient, tmp_data_dir):
+class TestSPACatchAll:
+    """All former Jinja HTML routes now serve the SPA index.html."""
+
+    async def test_root_serves_spa(self, client: AsyncClient):
+        resp = await client.get("/")
+        assert resp.status_code == 200
+        assert "SPA" in resp.text
+
+    async def test_repo_home_serves_spa(self, client: AsyncClient):
+        resp = await client.get("/gh/alice/proj/")
+        assert resp.status_code == 200
+
+    async def test_branch_path_serves_spa(self, client: AsyncClient):
+        resp = await client.get("/gh/alice/proj/b/main")
+        assert resp.status_code == 200
+
+    async def test_hash_path_serves_spa(self, client: AsyncClient):
         resp = await client.get(f"/gh/alice/proj/h/{SHA}")
         assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "iframe" in resp.text
-        assert f"/raw/gh/alice/proj/h/{SHA}/" in resp.text
 
-    async def test_contains_nav_buttons(self, client: AsyncClient, tmp_data_dir):
-        resp = await client.get(f"/gh/alice/proj/h/{SHA}")
-        assert "github.com/alice/proj" in resp.text
-        assert f"/gh/alice/proj/h/{SHA}/chart" in resp.text
-
-    async def test_uses_provider_url_from_report(
-        self, client: AsyncClient, tmp_data_dir
-    ):
-        await seed_report(
-            tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh"
-        )
-        resp = await client.get(f"/gh/alice/proj/h/{SHA}")
-        assert "gitlab.com/alice/proj" in resp.text
-
-
-class TestHashChart:
-    async def test_returns_chart_html(self, client: AsyncClient, tmp_data_dir):
+    async def test_hash_chart_path_serves_spa(self, client: AsyncClient):
         resp = await client.get(f"/gh/alice/proj/h/{SHA}/chart")
         assert resp.status_code == 200
-        assert "text/html" in resp.headers["content-type"]
-        assert "Coverage" in resp.text
-        assert f"/api/gh/alice/proj/h/{SHA}/latest/uncovered-lines" in resp.text
-        assert f"/api/gh/alice/proj/h/{SHA}/latest/worst-files" in resp.text
-        # Hash chart should NOT have a trend timeline
-        assert f"/api/gh/alice/proj/h/{SHA}/trend" not in resp.text
-
-    async def test_uses_provider_url_from_report(
-        self, client: AsyncClient, tmp_data_dir
-    ):
-        await seed_report(
-            tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh"
-        )
-        resp = await client.get(f"/gh/alice/proj/h/{SHA}/chart")
-        assert "gitlab.com/alice/proj" in resp.text
 
 
 class TestRawHashRedirect:

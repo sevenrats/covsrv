@@ -770,9 +770,10 @@ class TestRequireViewPermission:
             "/gh/alice/private-repo/b/main",
             follow_redirects=False,
         )
-        assert resp.status_code == 403
-        assert "Access Denied" in resp.text
-        assert "alice/private-repo" in resp.text
+        # SPA: AccessDenied now redirects to /access-denied with query params
+        assert resp.status_code == 307
+        assert "/access-denied" in resp.headers["location"]
+        assert "private-repo" in resp.headers["location"]
 
     async def test_authenticated_denied_api_returns_404(self, auth_client: AsyncClient):
         """API/JSON request for a denied repo still gets a 404 (no leak)."""

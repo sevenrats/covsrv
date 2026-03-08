@@ -1,0 +1,107 @@
+/* ── Theme: unified color palette (millennial charcoal + plum accents) ── */
+
+:root {
+  /* surface / background */
+  --clr-bg: #f5f5f6;
+  --clr-surface: #ffffff;
+  --clr-surface-alt: #eeeef0;
+
+  /* navbar */
+  --clr-nav-bg: #2b2b2e;
+  --clr-nav-border: #3e3e42;
+  --clr-nav-text: #d4d4d8;
+  --clr-nav-btn-bg: #3a3a3f;
+  --clr-nav-btn-hover: #4a4a50;
+
+  /* text */
+  --clr-text: #2b2b2e;
+  --clr-text-muted: #74747a;
+  --clr-text-faint: #a0a0a6;
+
+  /* borders / shadows */
+  --clr-border: #dddde0;
+  --clr-border-strong: #c8c8cc;
+  --clr-shadow: rgba(0, 0, 0, 0.05);
+
+  /* accent (dark lipstick / plum) */
+  --clr-accent: #863a5e;
+  --clr-accent-hover: #a04c74;
+  --clr-accent-subtle: rgba(134, 58, 94, 0.08);
+
+  /* pill / tag */
+  --clr-pill-bg: #eaeaec;
+  --clr-pill-text: #3c3c40;
+
+  /* buttons */
+  --clr-btn-bg: #f0f0f2;
+  --clr-btn-border: #d4d4d8;
+  --clr-btn-hover-bg: #e4e4e8;
+  --clr-btn-hover-bdr: #bcbcc2;
+
+  /* coverage scale */
+  --clr-cov-great: #4a8c6f;
+  --clr-cov-good: #8a7d3a;
+  --clr-cov-warn: #b06a38;
+  --clr-cov-bad: #a03c3c;
+  --clr-cov-empty: #e8e8eb;
+
+  /* coverage scale with transparency (bar fills) */
+  --clr-cov-great-t: rgba(74, 140, 111, 0.72);
+  --clr-cov-good-t: rgba(138, 125, 58, 0.72);
+  --clr-cov-warn-t: rgba(176, 106, 56, 0.72);
+  --clr-cov-bad-t: rgba(160, 60, 60, 0.72);
+
+  /* trend line */
+  --clr-trend-line: #6e4a7a;
+  --clr-trend-fill: rgba(110, 74, 122, 0.1);
+
+  /* pie palette (8 slots, muted earth + jewel tones) */
+  --clr-pie-0: #863a5e;
+  --clr-pie-1: #4a8c6f;
+  --clr-pie-2: #6e4a7a;
+  --clr-pie-3: #b06a38;
+  --clr-pie-4: #3a6e8c;
+  --clr-pie-5: #8a7d3a;
+  --clr-pie-6: #a03c3c;
+  --clr-pie-7: #5a5a5e;
+
+  /* chart sizing */
+  --chart-h: 360px;
+}
+
+/* ── dark theme override ── */
+[data-theme="dark"] {
+  --clr-bg: #1a1a1e;
+  --clr-surface: #26262a;
+  --clr-surface-alt: #2f2f34;
+
+  --clr-nav-bg: #18181b;
+  --clr-nav-border: #2e2e32;
+  --clr-nav-text: #d4d4d8;
+  --clr-nav-btn-bg: #2a2a2f;
+  --clr-nav-btn-hover: #3a3a40;
+
+  --clr-text: #e4e4e8;
+  --clr-text-muted: #a0a0a6;
+  --clr-text-faint: #6a6a70;
+
+  --clr-border: #3a3a3e;
+  --clr-border-strong: #4a4a4e;
+  --clr-shadow: rgba(0, 0, 0, 0.3);
+
+  --clr-accent: #c06090;
+  --clr-accent-hover: #d878a8;
+  --clr-accent-subtle: rgba(192, 96, 144, 0.12);
+
+  --clr-pill-bg: #32323a;
+  --clr-pill-text: #d0d0d4;
+
+  --clr-btn-bg: #2a2a2f;
+  --clr-btn-border: #3e3e44;
+  --clr-btn-hover-bg: #383840;
+  --clr-btn-hover-bdr: #4e4e54;
+
+  --clr-cov-empty: #2e2e34;
+
+  --clr-trend-fill: rgba(110, 74, 122, 0.18);
+}

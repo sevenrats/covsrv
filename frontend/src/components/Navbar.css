@@ -1,0 +1,139 @@
+.navbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  gap: 10px;
+  background: var(--clr-nav-bg);
+  border-bottom: 1px solid var(--clr-nav-border);
+}
+
+.nav-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--clr-nav-border);
+  background: var(--clr-nav-btn-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: var(--clr-nav-text);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.nav-btn:hover {
+  background: var(--clr-nav-btn-hover);
+  border-color: var(--clr-text-faint);
+}
+
+.nav-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-spacer {
+  flex: 1;
+}
+
+.nav-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--clr-nav-btn-bg);
+  border: 1px solid var(--clr-nav-border);
+  font-size: 12px;
+  color: var(--clr-nav-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+.nav-pill a {
+  color: #e0a0c0;
+  text-decoration: none;
+}
+
+.nav-pill a:hover {
+  text-decoration: underline;
+}
+
+.menu-wrap {
+  position: relative;
+}
+
+.context-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 40px;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--clr-shadow);
+  min-width: 180px;
+  z-index: 100;
+  padding: 4px 0;
+}
+
+.context-menu.open {
+  display: block;
+}
+
+.context-menu a {
+  display: block;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--clr-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.context-menu a:hover {
+  background: var(--clr-surface-alt);
+}
+
+.branch-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.branch-menu {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: 40px;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px var(--clr-shadow);
+  min-width: 200px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 100;
+  padding: 4px 0;
+}
+
+.branch-menu.open {
+  display: block;
+}
+
+.branch-menu a {
+  display: block;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--clr-text);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.branch-menu a:hover {
+  background: var(--clr-surface-alt);
+}
+
+.branch-menu a.active {
+  font-weight: 600;
+  color: var(--clr-accent, #0969da);
+}

@@ -142,6 +142,20 @@ async def client(initialized_db: Path):
 VALID_TOKEN = "test-coverage-token"
 
 
+@pytest.fixture(autouse=True)
+def _ensure_spa_index(tmp_path):
+    """Provide a minimal SPA index.html so protected routes don't 500."""
+    import main as app_module
+
+    original = app_module._SPA_DIR
+    spa_dir = tmp_path / "spa_dist"
+    spa_dir.mkdir()
+    (spa_dir / "index.html").write_text("<!doctype html><html><body>SPA</body></html>")
+    app_module._SPA_DIR = spa_dir
+    yield
+    app_module._SPA_DIR = original
+
+
 @pytest.fixture()
 def valid_token() -> str:
     """Return a token string that passes verify_token().

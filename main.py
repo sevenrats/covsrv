@@ -28,7 +28,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from jinja2 import Environment, PackageLoader, select_autoescape
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -44,11 +44,6 @@ from covsrv.auth import (
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
 from covsrv.config import ConfigManager
 from covsrv.models import DEFAULT_PROVIDER_URL, BranchEvent, Report
-
-_jinja_env = Environment(
-    loader=PackageLoader("covsrv", "templates"),
-    autoescape=select_autoescape(["html"]),
-)
 
 # ----------------------------
 # Configuration
@@ -445,13 +440,12 @@ async def _auth_required_redirect(
 
 
 @app.exception_handler(AccessDenied)
-async def _access_denied_page(
+async def _access_denied_redirect(
     request: Request,
     exc: AccessDenied,  # noqa: ARG001
-) -> HTMLResponse:
-    template = _jinja_env.get_template("access_denied.html")
-    html = template.render(owner=exc.owner, name=exc.name)
-    return HTMLResponse(content=html, status_code=403)
+) -> RedirectResponse:
+    url = f"/access-denied?owner={_url_quote(exc.owner, safe='')}&name={_url_quote(exc.name, safe='')}"
+    return RedirectResponse(url=url, status_code=307)
 
 
 # Convenience alias used as a route-level dependency on protected endpoints.
@@ -605,99 +599,6 @@ async def ingest_report(
     }
 
 
-# ----------------------------
-# Dashboards (HTML)
-# ----------------------------
-
-
-def _resolve_provider_url(provider_name: str, row: dict[str, Any] | None) -> str:
-    """Resolve provider URL, preferring config lookup by provider name."""
-    if config_manager is not None:
-        entry = config_manager.get_provider(provider_name)
-        if entry:
-            return entry.url
-    if row is None:
-        return DEFAULT_PROVIDER_URL
-    # Fallback to stored provider_url
-    purl = row.get("provider_url", "")
-    return purl if purl else DEFAULT_PROVIDER_URL
-
-
-def dashboard_html_for(
-    kind: str,
-    provider_name: str,
-    repo_full: str,
-    ref: str,
-    provider_url: str = DEFAULT_PROVIDER_URL,
-    branches: list[str] | None = None,
-    hash_branches: list[str] | None = None,
-) -> str:
-    owner, name = repo_full.split("/", 1)
-    base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
-    github_url = f"{base}/{owner}/{name}"
-    branches_base_url = f"/{provider_name}/{owner}/{name}"
-
-    if kind == "h":
-        raw_url = f"/{provider_name}/{owner}/{name}/h/"
-        uncovered_url = (
-            f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/uncovered-lines"
-        )
-        worst_files_url = (
-            f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/worst-files"
-        )
-        download_suffix = f"/{provider_name}/{owner}/{name}/h/{ref}"
-        raw_framed_url = f"/{provider_name}/{owner}/{name}/h/{ref}"
-        # Pick the first branch whose head matches this hash (if any).
-        hash_branch = (hash_branches or [""])[0] if hash_branches else ""
-
-        template = _jinja_env.get_template("dashboard_hash.html")
-        return template.render(
-            raw_url=raw_url,
-            uncovered_url=uncovered_url,
-            worst_files_url=worst_files_url,
-            download_suffix=download_suffix,
-            pie_limit=DEFAULT_PIE_FILES,
-            worst_limit=DEFAULT_WORST_FILES,
-            github_url=github_url,
-            raw_framed_url=raw_framed_url,
-            branches=branches or [],
-            branches_base_url=branches_base_url,
-            current_branch="",
-            repo_name=name,
-            git_ref=ref,
-            hash_branch=hash_branch,
-        )
-    else:
-        raw_url = f"/{provider_name}/{owner}/{name}/h/"
-        trend_url = f"/api/{provider_name}/{owner}/{name}/b/{ref}/trend"
-        uncovered_url = (
-            f"/api/{provider_name}/{owner}/{name}/b/{ref}/latest/uncovered-lines"
-        )
-        download_suffix = f"/{provider_name}/{owner}/{name}/b/{ref}"
-        raw_framed_url = ""
-
-        template = _jinja_env.get_template("dashboard_branch.html")
-        return template.render(
-            raw_url=raw_url,
-            trend_url=trend_url,
-            uncovered_url=uncovered_url,
-            download_suffix=download_suffix,
-            trend_limit=TREND_LIMIT,
-            pie_limit=DEFAULT_PIE_FILES,
-            github_url=github_url,
-            raw_framed_url=raw_framed_url,
-            branches=branches or [],
-            branches_base_url=branches_base_url,
-            current_branch=ref,
-            repo_name=name,
-        )
-
-
-@app.get("/", response_class=HTMLResponse)
-async def root() -> RedirectResponse:
-    return RedirectResponse(url="/docs")
-
-
 @app.get("/badge/{provider}/{owner}/{name}/h/{git_hash}")
 async def badge_hash_svg(
     provider: str,
@@ -752,39 +653,6 @@ async def badge_branch_svg(
     return svg_response(svg, cache_control=cache, etag_seed=seed)
 
 
-@app.get(
-    "/{provider}/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn
-)
-async def repo_home(provider: str, owner: str, name: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/{provider}/{owner}/{name}/b/main")
-
-
-@app.get(
-    "/{provider}/{owner}/{name}/b/{branch:path}",
-    response_class=HTMLResponse,
-    dependencies=_authn,
-)
-async def repo_branch_dashboard(
-    request: Request, provider: str, owner: str, name: str, branch: str
-) -> str:
-    provider_id = _get_provider_id(provider)
-    repo_full = repo_from_owner_name(owner, name)
-    head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
-    row = None
-    if head_hash:
-        row = await db.latest_report_for_repo_hash(provider_id, repo_full, head_hash)
-    provider_url = _resolve_provider_url(provider, row)
-    branches = await db.branches_for_repo(provider_id, repo_full)
-    return dashboard_html_for(
-        "b",
-        provider,
-        repo_full,
-        branch,
-        provider_url=provider_url,
-        branches=branches,
-    )
-
-
 # ----------------------------
 # Raw HTML reports at /raw/... (served as-is from disk)
 # ----------------------------
@@ -835,83 +703,6 @@ async def raw_hash_file(
         raise HTTPException(status_code=404, detail="Not found")
 
     return FileResponse(path=str(p))
-
-
-# ----------------------------
-# Framed raw view (nav bar + iframe)
-# ----------------------------
-
-
-def framed_html_for(
-    provider_name: str,
-    repo_full: str,
-    git_hash: str,
-    provider_url: str = DEFAULT_PROVIDER_URL,
-    branches: list[str] | None = None,
-) -> str:
-    owner, name = repo_full.split("/", 1)
-    base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
-    github_url = f"{base}/{owner}/{name}"
-    chart_url = f"/{provider_name}/{owner}/{name}/h/{git_hash}/chart"
-    raw_src = f"/raw/{provider_name}/{owner}/{name}/h/{git_hash}/"
-    branches_base_url = f"/{provider_name}/{owner}/{name}"
-
-    template = _jinja_env.get_template("framed_raw.html")
-    return template.render(
-        github_url=github_url,
-        chart_url=chart_url,
-        raw_src=raw_src,
-        branches=branches or [],
-        branches_base_url=branches_base_url,
-        current_branch="",
-    )
-
-
-@app.get(
-    "/{provider}/{owner}/{name}/h/{git_hash}",
-    response_class=HTMLResponse,
-    dependencies=_authn,
-)
-async def repo_hash_framed(
-    request: Request, provider: str, owner: str, name: str, git_hash: str
-) -> str:
-    provider_id = _get_provider_id(provider)
-    repo_full = repo_from_owner_name(owner, name)
-    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
-    provider_url = _resolve_provider_url(provider, row)
-    branches = await db.branches_for_repo(provider_id, repo_full)
-    return framed_html_for(
-        provider,
-        repo_full,
-        git_hash,
-        provider_url=provider_url,
-        branches=branches,
-    )
-
-
-@app.get(
-    "/{provider}/{owner}/{name}/h/{git_hash}/chart",
-    response_class=HTMLResponse,
-    dependencies=_authn,
-)
-async def repo_hash_chart(
-    request: Request, provider: str, owner: str, name: str, git_hash: str
-) -> str:
-    provider_id = _get_provider_id(provider)
-    repo_full = repo_from_owner_name(owner, name)
-    row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
-    provider_url = _resolve_provider_url(provider, row)
-    branches = await db.branches_for_repo(provider_id, repo_full)
-    hash_branches = await db.branches_for_hash(provider_id, repo_full, git_hash)
-    return dashboard_html_for(
-        "h",
-        provider,
-        repo_full,
-        git_hash,
-        provider_url=provider_url,
-        branches=branches,
-        hash_branches=hash_branches,
-    )
 
 
 # ----------------------------
@@ -1223,6 +1014,102 @@ async def api_repo_branch_latest_uncovered_lines(
             ],
         }
     )
+
+
+# ----------------------------
+# APIs (branches)
+# ----------------------------
+
+
+@app.get("/api/{provider}/{owner}/{name}/branches", dependencies=_authn)
+async def api_repo_branches(provider: str, owner: str, name: str) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
+    repo_full = repo_from_owner_name(owner, name)
+    branches = await db.branches_for_repo(provider_id, repo_full)
+    return JSONResponse({"branches": branches})
+
+
+@app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/branches", dependencies=_authn)
+async def api_repo_hash_branches(
+    provider: str, owner: str, name: str, git_hash: str
+) -> JSONResponse:
+    provider_id = _get_provider_id(provider)
+    repo_full = repo_from_owner_name(owner, name)
+    branches = await db.branches_for_hash(provider_id, repo_full, git_hash)
+    return JSONResponse({"branches": branches})
+
+
+# ----------------------------
+# SPA serving (React frontend)
+# ----------------------------
+
+_SPA_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
+
+# Serve built Vite assets (js, css, fonts, etc.)
+if (_SPA_DIR / "assets").is_dir():
+    app.mount(
+        "/assets", StaticFiles(directory=str(_SPA_DIR / "assets")), name="spa-assets"
+    )
+
+
+def _serve_spa() -> HTMLResponse:
+    """Read and return the SPA index.html."""
+    index = _SPA_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(
+            status_code=500,
+            detail="Frontend not built. Run 'npm run build' in frontend/.",
+        )
+    return HTMLResponse(content=index.read_text())
+
+
+# Auth-protected SPA routes — run require_view_permission before serving.
+# These explicit patterns expose the {provider}, {owner}, {name} path params
+# that the auth dependency needs.
+
+
+@app.get(
+    "/{provider}/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn
+)
+async def spa_repo_home(provider: str, owner: str, name: str) -> HTMLResponse:
+    return _serve_spa()
+
+
+@app.get(
+    "/{provider}/{owner}/{name}/b/{branch:path}",
+    response_class=HTMLResponse,
+    dependencies=_authn,
+)
+async def spa_branch(provider: str, owner: str, name: str, branch: str) -> HTMLResponse:
+    return _serve_spa()
+
+
+@app.get(
+    "/{provider}/{owner}/{name}/h/{git_hash}",
+    response_class=HTMLResponse,
+    dependencies=_authn,
+)
+async def spa_hash_framed(
+    provider: str, owner: str, name: str, git_hash: str
+) -> HTMLResponse:
+    return _serve_spa()
+
+
+@app.get(
+    "/{provider}/{owner}/{name}/h/{git_hash}/chart",
+    response_class=HTMLResponse,
+    dependencies=_authn,
+)
+async def spa_hash_chart(
+    provider: str, owner: str, name: str, git_hash: str
+) -> HTMLResponse:
+    return _serve_spa()
+
+
+@app.get("/{full_path:path}", response_class=HTMLResponse)
+async def spa_catchall(full_path: str) -> HTMLResponse:
+    """Serve the React SPA for all unmatched routes (no auth)."""
+    return _serve_spa()
 
 
 if __name__ == "__main__":

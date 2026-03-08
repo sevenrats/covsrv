@@ -1,0 +1,24 @@
+when:
+  - event: [push]
+    branch: react
+
+steps:
+  - name: test
+    image: python:3.13-slim
+    commands:
+      - pip install uv
+      - uv pip compile pyproject.toml -o requirements.txt
+      - pip install -r requirements.txt
+      - coverage run -m pytest
+
+  - name: docker-push
+    image: woodpeckerci/plugin-kaniko
+    settings:
+      repo: covsrv/covsrv
+      registry: git.crandall.codes
+      tags: react
+      dockerfile: Dockerfile
+      username:
+        from_secret: WRITE_CC_REG_USER
+      password:
+        from_secret: WRITE_CC_REG_PAT
