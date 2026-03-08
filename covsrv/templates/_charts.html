@@ -6,7 +6,7 @@
 <!-- ── Timeline line chart (branch view) ──────────────────────────── -->
 
 {% macro trend_chart(canvas_id='trendChart') %}
-<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
+<div class="chart-box" style="margin-top:12px;"><canvas id="{{ canvas_id }}"></canvas></div>
 <script>
 window.renderTrendChart = function(id, labels, values) {
   var cs = getComputedStyle(document.documentElement);
@@ -141,7 +141,7 @@ window.renderCoverageGauge = function(id, percent) {
 <!-- ── Per-file coverage horizontal bar (hash view) ───────────────── -->
 
 {% macro file_coverage_bar(canvas_id='fileCoverageBar') %}
-<div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
+<div class="chart-box" style="margin-top:12px;"><canvas id="{{ canvas_id }}"></canvas></div>
 <script>
 window.renderFileCoverageBar = function(id, labels, values) {
   var cs = getComputedStyle(document.documentElement);

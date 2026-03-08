@@ -842,18 +842,23 @@ def framed_html_for(
     repo_full: str,
     git_hash: str,
     provider_url: str = DEFAULT_PROVIDER_URL,
+    branches: list[str] | None = None,
 ) -> str:
     owner, name = repo_full.split("/", 1)
     base = provider_url.rstrip("/") if provider_url else DEFAULT_PROVIDER_URL
     github_url = f"{base}/{owner}/{name}"
     chart_url = f"/{provider_name}/{owner}/{name}/h/{git_hash}/chart"
     raw_src = f"/raw/{provider_name}/{owner}/{name}/h/{git_hash}/"
+    branches_base_url = f"/{provider_name}/{owner}/{name}"
 
     template = _jinja_env.get_template("framed_raw.html")
     return template.render(
         github_url=github_url,
         chart_url=chart_url,
         raw_src=raw_src,
+        branches=branches or [],
+        branches_base_url=branches_base_url,
+        current_branch="",
     )
 
 
@@ -869,11 +874,13 @@ async def repo_hash_framed(
     repo_full = repo_from_owner_name(owner, name)
     row = await db.latest_report_for_repo_hash(provider_id, repo_full, git_hash)
     provider_url = _resolve_provider_url(provider, row)
+    branches = await db.branches_for_repo(provider_id, repo_full)
     return framed_html_for(
         provider,
         repo_full,
         git_hash,
         provider_url=provider_url,
+        branches=branches,
     )
 
 
