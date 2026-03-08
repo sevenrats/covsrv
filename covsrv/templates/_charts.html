@@ -8,23 +8,27 @@
 {% macro trend_chart(canvas_id='trendChart') %}
 <div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
 <script>
-window.renderTrendChart = function(id, labels, values) {
+window.renderTrendChart = function(id, points, rawUrlBase) {
   var cs = getComputedStyle(document.documentElement);
   var lineClr = cs.getPropertyValue("--clr-trend-line").trim();
   var fillClr = cs.getPropertyValue("--clr-trend-fill").trim();
 
-  new Chart(document.getElementById(id), {
+  var labels = points.map(function() { return ""; });
+  var values = points.map(function(p) { return p.overall_percent; });
+
+  var canvas = document.getElementById(id);
+  var chart = new Chart(canvas, {
     type: "line",
     data: {
       labels: labels,
       datasets: [{
-        label: "Overall % covered",
         data: values,
         tension: 0.25,
         borderColor: lineClr,
         backgroundColor: fillClr,
         pointBackgroundColor: lineClr,
-        pointRadius: 3,
+        pointRadius: 4,
+        pointHoverRadius: 7,
         fill: true
       }]
     },
@@ -39,8 +43,32 @@ window.renderTrendChart = function(id, labels, values) {
       maintainAspectRatio: false,
       layout: { padding: { top: 0 } },
       scales: {
-        y: { min: 0, max: 100 },
-        x: { ticks: { maxRotation: 45 } }
+        y: { min: 0, max: 100, display: false },
+        x: { display: false }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: function(ctx) {
+              var p = points[ctx[0].dataIndex];
+              return new Date(p.received_ts * 1000).toLocaleString();
+            },
+            label: function(ctx) {
+              var p = points[ctx.dataIndex];
+              return p.overall_percent.toFixed(2) + "% — " + p.git_hash.slice(0, 8);
+            }
+          }
+        }
+      },
+      onClick: function(evt, elements) {
+        if (elements.length > 0 && rawUrlBase) {
+          var p = points[elements[0].index];
+          window.location.href = rawUrlBase + p.git_hash + "/chart";
+        }
+      },
+      onHover: function(evt, elements) {
+        canvas.style.cursor = elements.length > 0 ? "pointer" : "default";
       }
     }
   });

@@ -97,9 +97,7 @@
       }
 
       /* trend line chart */
-      const tlabels = (trend.points || []).map(function(p) { return tsToLabel(p.received_ts); });
-      const tvals   = (trend.points || []).map(function(p) { return p.overall_percent; });
-      window.renderTrendChart("trendChart", tlabels, tvals);
+      window.renderTrendChart("trendChart", trend.points || [], "{{ raw_url }}");
 
       /* uncovered-lines pie */
       const files     = uncovered.files || [];
