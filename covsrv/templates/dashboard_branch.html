@@ -31,7 +31,7 @@
 
   <div class="content">
     <div class="top">
-      <h1 style="margin:0;font-size:28px;">{{ repo_name }}</h1>
+      <h1 style="margin:0;font-size:34px;">{{ repo_name }}</h1>
       <span class="pill" id="metaPill" style="display:none"></span>
     </div>
 
@@ -90,7 +90,7 @@
         var parts = [];
         parts.push(latest.overall_percent.toFixed(1) + "% covered");
         if (typeof latest.total_files === "number")
-          parts.push(latest.total_files + " files");
+          parts.push(latest.total_files + " files changed");
         if (typeof latest.total_uncovered === "number")
           parts.push(latest.total_uncovered + " uncovered lines");
         parts.push(tsToLabel(latest.received_ts));
