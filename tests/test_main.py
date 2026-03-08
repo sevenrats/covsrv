@@ -456,6 +456,38 @@ class TestFramedHtmlFor:
         assert "gitlab.com/alice/proj" in html
         assert "github.com" not in html
 
+    def test_loading_overlay_hidden_by_default(self):
+        """The overlay must start with display:none so it is invisible when
+        there is no ``?file=`` query parameter.  A previous bug had both
+        ``display:none`` and ``display:flex`` in the same style attribute,
+        causing the overlay to always show."""
+        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
+        # Extract the inline style of the loadingOverlay div
+        import re
+
+        m = re.search(r'id="loadingOverlay"\s+style="([^"]*)"', html)
+        assert m, "loadingOverlay div not found in rendered HTML"
+        style = m.group(1)
+        # There must be exactly one display declaration and it must be 'none'
+        declarations = [
+            d.strip() for d in style.split(";") if d.strip().startswith("display")
+        ]
+        assert len(declarations) == 1, (
+            f"Expected exactly 1 display declaration, got {declarations}"
+        )
+        assert declarations[0] == "display:none", (
+            f"Overlay should default to display:none, got '{declarations[0]}'"
+        )
+
+    def test_overlay_activated_by_js_only_with_file_param(self):
+        """The JS must only flip the overlay to display:flex when ?file= is
+        present (the ``if (!targetFile) return;`` guard)."""
+        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
+        # The script must early-return when there is no file param
+        assert "if (!targetFile) return;" in html
+        # And only after the guard does it set display to flex
+        assert 'overlay.style.display = "flex"' in html
+
 
 # =====================================================================
 # Integration tests — HTTP endpoints (need DB + client)

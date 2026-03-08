@@ -120,6 +120,9 @@
 </style>
 
 <nav class="navbar">
+  <button class="nav-btn nav-back" id="backBtn" title="Back" type="button" style="display:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+  </button>
   {% if branches %}
   <div class="branch-dropdown">
     <button class="nav-btn" id="branchBtn" title="Branches" type="button">
@@ -179,6 +182,13 @@
       if (menu) menu.classList.remove("open");
       if (branchMenu) branchMenu.classList.remove("open");
     });
+
+    /* ── back button ──────────────────────────────────────── */
+    var backBtn = document.getElementById("backBtn");
+    if (backBtn && window.history.length > 1 && document.referrer) {
+      backBtn.style.display = "inline-flex";
+      backBtn.addEventListener("click", function() { window.history.back(); });
+    }
 
     /* ── theme toggle ─────────────────────────────────────── */
     var toggle = document.getElementById("themeToggle");
