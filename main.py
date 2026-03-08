@@ -1058,6 +1058,23 @@ async def latest_stats_from_xml(report_dir: Path) -> tuple[float, list[XmlFileSt
     return await asyncio.to_thread(parse_coverage_xml, xml_path)
 
 
+def _latest_payload(
+    repo_full: str,
+    row: dict[str, Any],
+    files: list[XmlFileStat],
+) -> dict[str, Any]:
+    """Build the ``latest`` dict returned by all dashboard API endpoints."""
+    total_uncovered = sum(f.uncovered_lines for f in files)
+    return {
+        "repo": repo_full,
+        "git_hash": row["git_hash"],
+        "received_ts": int(row["received_ts"]),
+        "overall_percent": float(row["overall_percent"]),
+        "total_files": len(files),
+        "total_uncovered": total_uncovered,
+    }
+
+
 @app.get(
     "/api/{provider}/{owner}/{name}/h/{git_hash}/latest/worst-files",
     dependencies=_authn,
@@ -1082,12 +1099,7 @@ async def api_repo_hash_latest_worst_files(
 
     return JSONResponse(
         {
-            "latest": {
-                "repo": repo_full,
-                "git_hash": row["git_hash"],
-                "received_ts": int(row["received_ts"]),
-                "overall_percent": float(row["overall_percent"]),
-            },
+            "latest": _latest_payload(repo_full, row, files),
             "files": [
                 {"filename": f.filename, "percent_covered": float(f.percent_covered)}
                 for f in files_sorted
@@ -1116,12 +1128,7 @@ async def api_repo_hash_latest_uncovered_lines(
 
     return JSONResponse(
         {
-            "latest": {
-                "repo": repo_full,
-                "git_hash": row["git_hash"],
-                "received_ts": int(row["received_ts"]),
-                "overall_percent": float(row["overall_percent"]),
-            },
+            "latest": _latest_payload(repo_full, row, files),
             "files": [
                 {"filename": f.filename, "uncovered_lines": int(f.uncovered_lines)}
                 for f in files_sorted
@@ -1176,12 +1183,7 @@ async def api_repo_branch_latest_worst_files(
 
     return JSONResponse(
         {
-            "latest": {
-                "repo": repo_full,
-                "git_hash": row["git_hash"],
-                "received_ts": int(row["received_ts"]),
-                "overall_percent": float(row["overall_percent"]),
-            },
+            "latest": _latest_payload(repo_full, row, files),
             "files": [
                 {"filename": f.filename, "percent_covered": float(f.percent_covered)}
                 for f in files_sorted
@@ -1214,12 +1216,7 @@ async def api_repo_branch_latest_uncovered_lines(
 
     return JSONResponse(
         {
-            "latest": {
-                "repo": repo_full,
-                "git_hash": row["git_hash"],
-                "received_ts": int(row["received_ts"]),
-                "overall_percent": float(row["overall_percent"]),
-            },
+            "latest": _latest_payload(repo_full, row, files),
             "files": [
                 {"filename": f.filename, "uncovered_lines": int(f.uncovered_lines)}
                 for f in files_sorted

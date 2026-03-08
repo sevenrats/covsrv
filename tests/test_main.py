@@ -410,14 +410,16 @@ class TestDashboardHtmlFor:
         assert "/api/myprov/alice/proj/b/main/trend" in html
         assert "/api/myprov/alice/proj/b/main/latest/uncovered-lines" in html
 
-    def test_branch_pill_shows_branch_name(self):
+    def test_branch_pill_in_navbar(self):
         html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "feat/x")
         assert "branch feat/x" in html
+        assert "nav-pill" in html
 
-    def test_hash_pill_shows_sha_prefix(self):
+    def test_hash_pill_in_navbar(self):
         sha = "abc1234567890"
         html = app_module.dashboard_html_for("h", "myprov", "alice/proj", sha)
         assert f"sha {sha[:10]}" in html
+        assert "nav-pill" in html
 
     def test_hash_pill_shows_branch_when_provided(self):
         sha = "abc1234567890"
@@ -454,9 +456,20 @@ class TestDashboardHtmlFor:
         assert "github.com/alice/proj" in html
         assert "/myprov/alice/proj/h/abc123" in html  # raw_framed_url
 
-    def test_branch_hides_spreadsheet(self):
-        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
-        assert 'style="display:none"' in html  # spreadsheet btn hidden
+    def test_download_row_present(self):
+        for kind, ref in [("b", "main"), ("h", "abc123")]:
+            html = app_module.dashboard_html_for(kind, "myprov", "alice/proj", ref)
+            assert "download-row" in html
+            assert "/download/json" in html
+            assert "/download/lcov" in html
+            assert "/download/xml" in html
+
+    def test_no_muted_row_subtitle(self):
+        for kind, ref in [("b", "main"), ("h", "abc123")]:
+            html = app_module.dashboard_html_for(kind, "myprov", "alice/proj", ref)
+            assert "muted-row" not in html
+            assert "Uncovered-lines are from" not in html
+            assert "Coverage snapshot for a single" not in html
 
     def test_custom_provider_url(self):
         html = app_module.dashboard_html_for(
@@ -842,6 +855,8 @@ class TestApiHashWorstFiles:
         data = resp.json()
         assert data["latest"] is not None
         assert data["latest"]["overall_percent"] == 85.0
+        assert data["latest"]["total_files"] == 2
+        assert isinstance(data["latest"]["total_uncovered"], int)
         assert len(data["files"]) == 2
 
 
@@ -861,6 +876,8 @@ class TestApiHashUncoveredLines:
         resp = await client.get(f"/api/gh/alice/proj/h/{SHA}/latest/uncovered-lines")
         data = resp.json()
         assert data["latest"]["overall_percent"] == 85.0
+        assert data["latest"]["total_files"] == 2
+        assert data["latest"]["total_uncovered"] == 5  # foo.py:2 + bar.py:3
         assert len(data["files"]) == 2
         # Sorted by uncovered_lines desc → bar.py (3) first
         assert (
