@@ -13,6 +13,11 @@
     height: calc(100% - 48px);
     border: none;
   }
+
+  @keyframes covsrv-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
 </style>
 {% endblock %}
 
@@ -26,6 +31,12 @@
       extra_buttons_html='<a class="nav-btn" href="' ~ chart_url ~ '" title="Chart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></a>'
   ) }}
   <iframe id="rawFrame" src="{{ raw_src }}"></iframe>
+  <div id="loadingOverlay" style="display:none;position:fixed;top:48px;left:0;right:0;bottom:0;background:var(--clr-bg);z-index:50;display:flex;align-items:center;justify-content:center;">
+    <div style="text-align:center;color:var(--clr-text-muted);font-family:system-ui,sans-serif;">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:covsrv-spin 1s linear infinite;"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      <div style="margin-top:10px;font-size:14px;">Loading file&hellip;</div>
+    </div>
+  </div>
   <script>
   (function() {
     var params = new URLSearchParams(window.location.search);
@@ -33,15 +44,30 @@
     if (!targetFile) return;
 
     var iframe = document.getElementById("rawFrame");
+    var overlay = document.getElementById("loadingOverlay");
+
+    /* Show overlay & hide iframe while we wait for the target file view */
+    iframe.style.visibility = "hidden";
+    overlay.style.display = "flex";
 
     function norm(s) { return s.replace(/\s*\/\s*/g, "/").replace(/\s*\\\s*/g, "/"); }
     var normTarget = norm(targetFile);
+
+    function reveal() {
+      overlay.style.display = "none";
+      iframe.style.visibility = "visible";
+    }
 
     function findAndClick(doc) {
       var links = doc.querySelectorAll("a");
       for (var i = 0; i < links.length; i++) {
         if (norm(links[i].textContent.trim()) === normTarget) {
           links[i].click();
+          /* Wait for the file view to load in the iframe, then reveal */
+          iframe.addEventListener("load", function onFileLoad() {
+            iframe.removeEventListener("load", onFileLoad);
+            reveal();
+          });
           return true;
         }
       }
@@ -52,21 +78,22 @@
       iframe.removeEventListener("load", onLoad);
       try {
         var doc = iframe.contentDocument || iframe.contentWindow.document;
-        /* Try immediately — works for static reports */
         if (findAndClick(doc)) return;
 
-        /* For JS-rendered reports, poll until the link appears */
         var attempts = 0;
-        var maxAttempts = 50; /* ~5 seconds */
+        var maxAttempts = 50;
         var poll = setInterval(function() {
           attempts++;
           try {
-            if (findAndClick(doc) || attempts >= maxAttempts) {
+            if (findAndClick(doc)) {
               clearInterval(poll);
+            } else if (attempts >= maxAttempts) {
+              clearInterval(poll);
+              reveal(); /* give up waiting, show whatever is there */
             }
-          } catch(e) { clearInterval(poll); }
+          } catch(e) { clearInterval(poll); reveal(); }
         }, 100);
-      } catch(e) { /* cross-origin guard */ }
+      } catch(e) { reveal(); }
     });
   })();
   </script>
