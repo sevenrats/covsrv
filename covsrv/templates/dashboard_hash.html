@@ -28,22 +28,13 @@
       branches=branches,
       branches_base_url=branches_base_url,
       current_branch=current_branch,
-      extra_buttons_html='<a class="nav-btn" id="spreadsheetBtn" href="' ~ (raw_framed_url if raw_framed_url else '#') ~ '" title="Report"' ~ (' style="display:none"' if not raw_framed_url) ~ '><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="3" y1="14" x2="21" y2="14"/><line x1="3" y1="18" x2="21" y2="18"/></svg></a>'
+      extra_buttons_html='<a class="nav-btn" id="spreadsheetBtn" href="' ~ (raw_framed_url if raw_framed_url else '#') ~ '" title="Raw HTML Report"' ~ (' style="display:none"' if not raw_framed_url) ~ '><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></a>'
   ) }}
 
   <div class="content">
     <div class="top">
       <h1 style="margin:0;">{{ repo_name }}</h1>
       <span class="pill" id="latestMeta">Loading…</span>
-      <div class="kpi-row">
-        <div class="kpi-gauge">
-          <canvas id="coverageGauge"></canvas>
-          <div id="coverageGaugeLabel" class="gauge-label">
-            <div class="gauge-value">&mdash;</div>
-            <div class="gauge-caption">cov</div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div class="muted-row">
@@ -69,44 +60,6 @@
 
 {% block scripts %}
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script>
-    window.renderCoverageGauge = function(id, percent) {
-      var cs = getComputedStyle(document.documentElement);
-      var color;
-      if (percent < 50)      color = cs.getPropertyValue("--clr-cov-bad").trim();
-      else if (percent < 75) color = cs.getPropertyValue("--clr-cov-warn").trim();
-      else if (percent < 90) color = cs.getPropertyValue("--clr-cov-good").trim();
-      else                   color = cs.getPropertyValue("--clr-cov-great").trim();
-      var empty = cs.getPropertyValue("--clr-cov-empty").trim();
-
-      new Chart(document.getElementById(id), {
-        type: "doughnut",
-        data: {
-          labels: ["Covered", "Uncovered"],
-          datasets: [{
-            data: [percent, 100 - percent],
-            backgroundColor: [color, empty],
-            borderWidth: 0
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          cutout: "75%",
-          plugins: {
-            legend: { display: false },
-            tooltip: { enabled: true }
-          }
-        }
-      });
-
-      var label = document.getElementById(id + "Label");
-      if (label) {
-        label.querySelector(".gauge-value").textContent = percent.toFixed(1) + "%";
-        label.querySelector(".gauge-value").style.color = color;
-      }
-    };
-  </script>
   <script>
     function tsToLabel(ts) {
       return new Date(ts * 1000).toLocaleString();
@@ -142,11 +95,8 @@
           btn.href = rawUrl;
           btn.style.display = "";
         }
-        /* mini gauge */
-        window.renderCoverageGauge("coverageGauge", latest.overall_percent);
       } else {
         meta.textContent = "No reports yet.";
-        window.renderCoverageGauge("coverageGauge", 0);
       }
 
       /* per-file coverage bar (worst files) */
