@@ -34,11 +34,13 @@
 
     var iframe = document.getElementById("rawFrame");
 
+    function norm(s) { return s.replace(/\s*\/\s*/g, "/").replace(/\s*\\\s*/g, "/"); }
+    var normTarget = norm(targetFile);
+
     function findAndClick(doc) {
       var links = doc.querySelectorAll("a");
       for (var i = 0; i < links.length; i++) {
-        var text = links[i].textContent.trim();
-        if (text === targetFile) {
+        if (norm(links[i].textContent.trim()) === normTarget) {
           links[i].click();
           return true;
         }
