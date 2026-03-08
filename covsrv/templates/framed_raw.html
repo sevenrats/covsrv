@@ -25,5 +25,28 @@
       current_branch=current_branch,
       extra_buttons_html='<a class="nav-btn" href="' ~ chart_url ~ '" title="Chart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></a>'
   ) }}
-  <iframe src="{{ raw_src }}"></iframe>
+  <iframe id="rawFrame" src="{{ raw_src }}"></iframe>
+  <script>
+  (function() {
+    var params = new URLSearchParams(window.location.search);
+    var targetFile = params.get("file");
+    if (!targetFile) return;
+
+    var iframe = document.getElementById("rawFrame");
+    iframe.addEventListener("load", function onLoad() {
+      iframe.removeEventListener("load", onLoad);
+      try {
+        var doc = iframe.contentDocument || iframe.contentWindow.document;
+        var links = doc.querySelectorAll("a");
+        for (var i = 0; i < links.length; i++) {
+          var text = links[i].textContent.trim();
+          if (text === targetFile) {
+            links[i].click();
+            return;
+          }
+        }
+      } catch(e) { /* cross-origin guard */ }
+    });
+  })();
+  </script>
 {% endblock %}

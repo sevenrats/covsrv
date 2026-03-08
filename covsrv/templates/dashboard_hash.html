@@ -110,7 +110,8 @@
       const plabels   = files.map(function(x) { return shorten(x.filename); });
       const pvals     = files.map(function(x) { return x.uncovered_lines; });
       const fullNames = files.map(function(x) { return x.filename; });
-      window.renderUncoveredPie("uncoveredPie", "uncoveredList", plabels, pvals, fullNames);
+      const pieRawUrl = "{{ raw_framed_url }}";
+      window.renderUncoveredPie("uncoveredPie", "uncoveredList", plabels, pvals, fullNames, pieRawUrl);
     })();
   </script>
 {% endblock %}

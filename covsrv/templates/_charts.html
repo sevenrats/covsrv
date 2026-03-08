@@ -83,7 +83,7 @@ window.renderTrendChart = function(id, points, rawUrlBase) {
 <div class="chart-box"><canvas id="{{ canvas_id }}"></canvas></div>
 <ol id="{{ list_id }}" class="uncovered-list"></ol>
 <script>
-window.renderUncoveredPie = function(id, listId, labels, values, fullNames) {
+window.renderUncoveredPie = function(id, listId, labels, values, fullNames, rawFramedUrl) {
   var cs = getComputedStyle(document.documentElement);
   var palette = [
     cs.getPropertyValue("--clr-pie-0").trim(),
@@ -97,7 +97,8 @@ window.renderUncoveredPie = function(id, listId, labels, values, fullNames) {
   ];
   var colors = labels.map(function(_, i) { return palette[i % palette.length]; });
 
-  new Chart(document.getElementById(id), {
+  var canvas = document.getElementById(id);
+  new Chart(canvas, {
     type: "pie",
     data: {
       labels: labels,
@@ -105,7 +106,17 @@ window.renderUncoveredPie = function(id, listId, labels, values, fullNames) {
     },
     options: {
       responsive: true,
-      maintainAspectRatio: false
+      maintainAspectRatio: false,
+      onClick: function(evt, elements) {
+        if (elements.length > 0 && rawFramedUrl) {
+          var idx = elements[0].index;
+          var file = fullNames[idx];
+          window.location.href = rawFramedUrl + "?file=" + encodeURIComponent(file);
+        }
+      },
+      onHover: function(evt, elements) {
+        canvas.style.cursor = elements.length > 0 ? "pointer" : "default";
+      }
     }
   });
 

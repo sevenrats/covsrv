@@ -104,7 +104,8 @@
       const plabels   = files.map(function(x) { return shorten(x.filename); });
       const pvals     = files.map(function(x) { return x.uncovered_lines; });
       const fullNames = files.map(function(x) { return x.filename; });
-      window.renderUncoveredPie("uncoveredPie", "uncoveredList", plabels, pvals, fullNames);
+      const pieRawUrl = latest ? ("{{ raw_url }}" + latest.git_hash) : "";
+      window.renderUncoveredPie("uncoveredPie", "uncoveredList", plabels, pvals, fullNames, pieRawUrl);
     })();
   </script>
 {% endblock %}
