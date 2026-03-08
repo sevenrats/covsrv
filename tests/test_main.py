@@ -449,6 +449,16 @@ class TestFramedHtmlFor:
         assert "{{" not in html
         assert "}}" not in html
 
+    def test_back_button_links_to_chart(self):
+        """The back button must be an anchor linking to the chart URL so it
+        navigates the outer page, not the iframe history."""
+        html = app_module.framed_html_for("myprov", "alice/proj", "abc123")
+        expected_chart = "/myprov/alice/proj/h/abc123/chart"
+        assert f'href="{expected_chart}"' in html
+        assert 'title="Back"' in html
+        # Must NOT use history.back() which is fooled by iframe navigation
+        assert "history.back()" not in html
+
     def test_custom_provider_url(self):
         html = app_module.framed_html_for(
             "myprov", "alice/proj", "abc123", provider_url="https://gitlab.com"
