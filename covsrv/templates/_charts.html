@@ -28,10 +28,16 @@ window.renderTrendChart = function(id, labels, values) {
         fill: true
       }]
     },
+    plugins: [{
+      beforeInit: function(chart) {
+        var h = chart.canvas.parentElement.clientHeight;
+        chart.options.layout.padding.top = Math.round(h * 0.15);
+      }
+    }],
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      layout: { padding: { top: 24 } },
+      layout: { padding: { top: 0 } },
       scales: {
         y: { min: 0, max: 100 },
         x: { ticks: { maxRotation: 45 } }
@@ -167,11 +173,17 @@ window.renderFileCoverageBar = function(id, labels, values) {
         borderRadius: 4
       }]
     },
+    plugins: [{
+      beforeInit: function(chart) {
+        var h = chart.canvas.parentElement.clientHeight;
+        chart.options.layout.padding.top = Math.round(h * 0.15);
+      }
+    }],
     options: {
       responsive: true,
       maintainAspectRatio: false,
       indexAxis: "y",
-      layout: { padding: { top: 24 } },
+      layout: { padding: { top: 0 } },
       scales: {
         x: { min: 0, max: 100, title: { display: true, text: "Coverage %" } }
       },
