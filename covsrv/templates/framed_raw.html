@@ -1,27 +1,26 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Coverage Report</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { height: 100%; overflow: hidden; }
+{#- Framed raw HTML report – navbar + iframe. #}
+{% extends '_base.html' %}
 
-      iframe {
-        width: 100%;
-        height: calc(100% - 48px);
-        border: none;
-      }
-    </style>
-  </head>
+{% block title %}Coverage Report{% endblock %}
 
-  <body>
-    {% from '_navbar.html' import navbar %}
-    {{ navbar(
-        github_url=github_url,
-        extra_buttons_html='<a class="nav-btn" href="' ~ chart_url ~ '" title="Chart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></a>'
-    ) }}
-    <iframe src="{{ raw_src }}"></iframe>
-  </body>
-</html>
+{% block head %}
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+
+  iframe {
+    width: 100%;
+    height: calc(100% - 48px);
+    border: none;
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+  {% from '_navbar.html' import navbar %}
+  {{ navbar(
+      github_url=github_url,
+      extra_buttons_html='<a class="nav-btn" href="' ~ chart_url ~ '" title="Chart"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></a>'
+  ) }}
+  <iframe src="{{ raw_src }}"></iframe>
+{% endblock %}

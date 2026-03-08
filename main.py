@@ -636,12 +636,26 @@ def dashboard_html_for(
 
     if kind == "h":
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
-        trend_url = f"/api/{provider_name}/{owner}/{name}/h/{ref}/trend"
         uncovered_url = (
             f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/uncovered-lines"
         )
+        worst_files_url = (
+            f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/worst-files"
+        )
         download_suffix = f"/{provider_name}/{owner}/{name}/h/{ref}"
         raw_framed_url = f"/{provider_name}/{owner}/{name}/h/{ref}"
+
+        template = _jinja_env.get_template("dashboard_hash.html")
+        return template.render(
+            raw_url=raw_url,
+            uncovered_url=uncovered_url,
+            worst_files_url=worst_files_url,
+            download_suffix=download_suffix,
+            pie_limit=DEFAULT_PIE_FILES,
+            worst_limit=DEFAULT_WORST_FILES,
+            github_url=github_url,
+            raw_framed_url=raw_framed_url,
+        )
     else:
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
         trend_url = f"/api/{provider_name}/{owner}/{name}/b/{ref}/trend"
@@ -651,17 +665,17 @@ def dashboard_html_for(
         download_suffix = f"/{provider_name}/{owner}/{name}/b/{ref}"
         raw_framed_url = ""
 
-    template = _jinja_env.get_template("dashboard.html")
-    return template.render(
-        raw_url=raw_url,
-        trend_url=trend_url,
-        uncovered_url=uncovered_url,
-        download_suffix=download_suffix,
-        trend_limit=TREND_LIMIT,
-        pie_limit=DEFAULT_PIE_FILES,
-        github_url=github_url,
-        raw_framed_url=raw_framed_url,
-    )
+        template = _jinja_env.get_template("dashboard_branch.html")
+        return template.render(
+            raw_url=raw_url,
+            trend_url=trend_url,
+            uncovered_url=uncovered_url,
+            download_suffix=download_suffix,
+            trend_limit=TREND_LIMIT,
+            pie_limit=DEFAULT_PIE_FILES,
+            github_url=github_url,
+            raw_framed_url=raw_framed_url,
+        )
 
 
 @app.get("/", response_class=HTMLResponse)

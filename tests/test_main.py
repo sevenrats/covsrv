@@ -396,9 +396,11 @@ class TestParseCoverageXml:
 class TestDashboardHtmlFor:
     def test_hash_kind(self):
         html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
-        assert "/api/myprov/alice/proj/h/abc123/trend" in html
         assert "/api/myprov/alice/proj/h/abc123/latest/uncovered-lines" in html
+        assert "/api/myprov/alice/proj/h/abc123/latest/worst-files" in html
         assert "/download/" in html  # download links present
+        # Hash view should NOT contain a trend URL (no timeline)
+        assert "/api/myprov/alice/proj/h/abc123/trend" not in html
         # Verify no raw Jinja2 placeholders remain
         assert "{{" not in html
         assert "}}" not in html
@@ -408,9 +410,13 @@ class TestDashboardHtmlFor:
         assert "/api/myprov/alice/proj/b/main/trend" in html
         assert "/api/myprov/alice/proj/b/main/latest/uncovered-lines" in html
 
-    def test_contains_trend_limit(self):
-        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
+    def test_branch_contains_trend_limit(self):
+        html = app_module.dashboard_html_for("b", "myprov", "alice/proj", "main")
         assert str(app_module.TREND_LIMIT) in html
+
+    def test_hash_contains_worst_limit(self):
+        html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
+        assert str(app_module.DEFAULT_WORST_FILES) in html
 
     def test_hash_contains_nav_urls(self):
         html = app_module.dashboard_html_for("h", "myprov", "alice/proj", "abc123")
@@ -623,7 +629,10 @@ class TestHashChart:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "Coverage" in resp.text
-        assert f"/api/gh/alice/proj/h/{SHA}/trend" in resp.text
+        assert f"/api/gh/alice/proj/h/{SHA}/latest/uncovered-lines" in resp.text
+        assert f"/api/gh/alice/proj/h/{SHA}/latest/worst-files" in resp.text
+        # Hash chart should NOT have a trend timeline
+        assert f"/api/gh/alice/proj/h/{SHA}/trend" not in resp.text
 
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
