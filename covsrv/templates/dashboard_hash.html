@@ -21,7 +21,7 @@
 {% block body %}
   {% from '_navbar.html' import navbar %}
   {% from '_card.html' import card %}
-  {% from '_charts.html' import coverage_gauge, file_coverage_bar, uncovered_pie %}
+  {% from '_charts.html' import file_coverage_bar, uncovered_pie %}
 
   {{ navbar(
       github_url=github_url,
@@ -35,6 +35,15 @@
     <div class="top">
       <h1 style="margin:0;">Coverage</h1>
       <span class="pill" id="latestMeta">Loading…</span>
+      <div class="kpi-row">
+        <div class="kpi-gauge">
+          <canvas id="coverageGauge"></canvas>
+          <div id="coverageGaugeLabel" class="gauge-label">
+            <div class="gauge-value">&mdash;</div>
+            <div class="gauge-caption">cov</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="muted-row">
@@ -47,16 +56,10 @@
     </div>
 
     <div class="grid">
-      {% call card('Overall coverage') %}
-        {{ coverage_gauge('coverageGauge') }}
-      {% endcall %}
-
       {% call card('Worst files by coverage') %}
         {{ file_coverage_bar('fileCoverageBar') }}
       {% endcall %}
-    </div>
 
-    <div class="grid" style="margin-top:0;">
       {% call card('Uncovered lines by file') %}
         {{ uncovered_pie('uncoveredPie', 'uncoveredList') }}
       {% endcall %}
@@ -66,6 +69,44 @@
 
 {% block scripts %}
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    window.renderCoverageGauge = function(id, percent) {
+      var cs = getComputedStyle(document.documentElement);
+      var color;
+      if (percent < 50)      color = cs.getPropertyValue("--clr-cov-bad").trim();
+      else if (percent < 75) color = cs.getPropertyValue("--clr-cov-warn").trim();
+      else if (percent < 90) color = cs.getPropertyValue("--clr-cov-good").trim();
+      else                   color = cs.getPropertyValue("--clr-cov-great").trim();
+      var empty = cs.getPropertyValue("--clr-cov-empty").trim();
+
+      new Chart(document.getElementById(id), {
+        type: "doughnut",
+        data: {
+          labels: ["Covered", "Uncovered"],
+          datasets: [{
+            data: [percent, 100 - percent],
+            backgroundColor: [color, empty],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: "75%",
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: true }
+          }
+        }
+      });
+
+      var label = document.getElementById(id + "Label");
+      if (label) {
+        label.querySelector(".gauge-value").textContent = percent.toFixed(1) + "%";
+        label.querySelector(".gauge-value").style.color = color;
+      }
+    };
+  </script>
   <script>
     function tsToLabel(ts) {
       return new Date(ts * 1000).toLocaleString();
@@ -90,9 +131,10 @@
       const latest = uncovered && uncovered.latest ? uncovered.latest : null;
       if (latest) {
         const rawUrl = "{{ raw_url }}" + latest.git_hash;
+        const chartUrl = rawUrl + "/chart";
         meta.innerHTML =
           latest.repo + " @ " +
-          '<a href="' + rawUrl + '">' + latest.git_hash + "</a> \u00b7 " +
+          '<a href="' + chartUrl + '">' + latest.git_hash + "</a> \u00b7 " +
           latest.overall_percent.toFixed(2) + "% \u00b7 " +
           tsToLabel(latest.received_ts);
         const btn = document.getElementById("spreadsheetBtn");
@@ -100,8 +142,7 @@
           btn.href = rawUrl;
           btn.style.display = "";
         }
-
-        /* gauge */
+        /* mini gauge */
         window.renderCoverageGauge("coverageGauge", latest.overall_percent);
       } else {
         meta.textContent = "No reports yet.";

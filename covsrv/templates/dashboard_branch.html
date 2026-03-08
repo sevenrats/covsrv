@@ -81,9 +81,10 @@
       const latest = uncovered && uncovered.latest ? uncovered.latest : null;
       if (latest) {
         const rawUrl = "{{ raw_url }}" + latest.git_hash;
+        const chartUrl = rawUrl + "/chart";
         meta.innerHTML =
           "Latest: " + latest.repo + " @ " +
-          '<a href="' + rawUrl + '">' + latest.git_hash + "</a> \u00b7 " +
+          '<a href="' + chartUrl + '">' + latest.git_hash + "</a> \u00b7 " +
           latest.overall_percent.toFixed(2) + "% \u00b7 " +
           tsToLabel(latest.received_ts);
         const btn = document.getElementById("spreadsheetBtn");

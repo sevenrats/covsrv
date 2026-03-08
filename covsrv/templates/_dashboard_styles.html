@@ -14,15 +14,54 @@
   }
 
   .pill {
-    padding: 6px 12px;
+    padding: 4px 10px;
     border-radius: 999px;
     background: var(--clr-pill-bg);
     color: var(--clr-pill-text);
-    font-size: 14px;
+    font-size: 12px;
   }
 
   .pill a {
     color: var(--clr-accent);
+  }
+
+  .kpi-row {
+    margin-left: auto;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .kpi-gauge {
+    position: relative;
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+  }
+
+  .kpi-gauge canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
+
+  .kpi-gauge .gauge-label {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+  }
+
+  .kpi-gauge .gauge-value {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .kpi-gauge .gauge-caption {
+    font-size: 7px;
+    margin-top: 1px;
   }
 
   .muted-row {

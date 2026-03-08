@@ -29,10 +29,10 @@
       }
 
       .pill {
-        padding:6px 12px;
+        padding:4px 10px;
         border-radius:999px;
         background:#f2f2f2;
-        font-size:14px;
+        font-size:12px;
       }
 
       /* Muted text + buttons row */
@@ -179,9 +179,10 @@
 
         if (latest) {
           const rawUrl = "{{ raw_url }}" + latest.git_hash;
+          const chartUrl = rawUrl + "/chart";
           meta.innerHTML =
             `Latest: ${latest.repo} @ ` +
-            `<a href="${rawUrl}">${latest.git_hash}</a> · ` +
+            `<a href="${chartUrl}">${latest.git_hash}</a> · ` +
             `${latest.overall_percent.toFixed(2)}% · ` +
             `${tsToLabel(latest.received_ts)}`;
           const spreadsheetBtn = document.getElementById("spreadsheetBtn");
