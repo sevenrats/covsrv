@@ -221,7 +221,8 @@ argon2-hashed token is used instead.
 ```
 
 Reports are immutable per commit SHA. A second upload for the same
-`(repo, sha)` pair returns `409 Conflict`.
+`(repo, sha)` pair returns `200 OK` (since the same SHA implies identical
+coverage, the existing report is kept).
 
 ---
 

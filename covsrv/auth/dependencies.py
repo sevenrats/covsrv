@@ -130,9 +130,9 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
         raise AssertionError  # pragma: no cover
 
     # --- require login ---
-    session_data = get_provider_session(request, provider_name)  # type: ignore[arg-type]
+    session_data = get_provider_session(request, provider_name)
     if session_data is None:
-        _handle_unauthenticated(request, provider_name)  # type: ignore[arg-type]
+        _handle_unauthenticated(request, provider_name)
         raise AssertionError  # pragma: no cover
 
     access_token: str = session_data["access_token"]
@@ -140,9 +140,9 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
     username: str = session_data.get("username", "")
 
     # --- check authz cache ---
-    cached = auth_state.cache.get(provider_name, user_id, owner, name)  # type: ignore[arg-type]
+    cached = auth_state.cache.get(provider_name, user_id, owner, name)
     if cached is True:
-        return ProviderUser(id=user_id, username=username, provider=provider_name)  # type: ignore[arg-type]
+        return ProviderUser(id=user_id, username=username, provider=provider_name)
     if cached is False:
         _handle_access_denied(request, owner, name)
         raise AssertionError  # pragma: no cover
@@ -163,19 +163,19 @@ async def require_view_permission(request: Request) -> ProviderUser | None:
         # same, and a stale ``False`` would block access even with a fresh
         # valid token.  Clearing the user's cache entries ensures a fresh
         # provider check after re-authentication.
-        clear_provider_session(request, provider_name)  # type: ignore[arg-type]
-        auth_state.cache.clear_user(provider_name, user_id)  # type: ignore[arg-type]
-        _handle_unauthenticated(request, provider_name)  # type: ignore[arg-type]
+        clear_provider_session(request, provider_name)
+        auth_state.cache.clear_user(provider_name, user_id)
+        _handle_unauthenticated(request, provider_name)
         raise AssertionError  # pragma: no cover
 
     allowed = result is RepoAccess.ALLOWED
-    auth_state.cache.set(provider_name, user_id, owner, name, allowed)  # type: ignore[arg-type]
+    auth_state.cache.set(provider_name, user_id, owner, name, allowed)
 
     if not allowed:
         _handle_access_denied(request, owner, name)
         raise AssertionError  # pragma: no cover
 
-    return ProviderUser(id=user_id, username=username, provider=provider_name)  # type: ignore[arg-type]
+    return ProviderUser(id=user_id, username=username, provider=provider_name)
 
 
 # ------------------------------------------------------------------

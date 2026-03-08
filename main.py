@@ -516,10 +516,8 @@ async def ingest_report(
     # Immutable location: reports/<provider_id>/<repo>/h/<sha>/
     report_dir = REPORTS_DIR / dto.provider_id / repo_fs / "h" / dto.sha
     if await anyio.Path(report_dir).exists():
-        # preserve "original" report for that commit hash
-        raise HTTPException(
-            status_code=409, detail="Report for this (repo, sha) already exists"
-        )
+        # Same SHA ⇒ same coverage; nothing new to store.
+        return {"status": "ok", "detail": "Report already exists for this SHA"}
 
     await anyio.Path(report_dir).mkdir(parents=True, exist_ok=True)
     html_dir = report_dir / "html"
@@ -571,11 +569,9 @@ async def ingest_report(
         try:
             await sess.flush()
         except IntegrityError:
-            # unique (repo, sha) collision (race)
+            # unique (repo, sha) collision (race) — same SHA means same coverage
             shutil.rmtree(report_dir, ignore_errors=True)
-            raise HTTPException(
-                status_code=409, detail="Report for this (repo, sha) already exists"
-            )
+            return {"status": "ok", "detail": "Report already exists for this SHA"}
 
         sess.add(
             BranchEvent(
@@ -641,13 +637,17 @@ def dashboard_html_for(
     if kind == "h":
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
         trend_url = f"/api/{provider_name}/{owner}/{name}/h/{ref}/trend"
-        uncovered_url = f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/uncovered-lines"
+        uncovered_url = (
+            f"/api/{provider_name}/{owner}/{name}/h/{ref}/latest/uncovered-lines"
+        )
         download_suffix = f"/{provider_name}/{owner}/{name}/h/{ref}"
         raw_framed_url = f"/{provider_name}/{owner}/{name}/h/{ref}"
     else:
         raw_url = f"/{provider_name}/{owner}/{name}/h/"
         trend_url = f"/api/{provider_name}/{owner}/{name}/b/{ref}/trend"
-        uncovered_url = f"/api/{provider_name}/{owner}/{name}/b/{ref}/latest/uncovered-lines"
+        uncovered_url = (
+            f"/api/{provider_name}/{owner}/{name}/b/{ref}/latest/uncovered-lines"
+        )
         download_suffix = f"/{provider_name}/{owner}/{name}/b/{ref}"
         raw_framed_url = ""
 
@@ -723,13 +723,17 @@ async def badge_branch_svg(
     return svg_response(svg, cache_control=cache, etag_seed=seed)
 
 
-@app.get("/{provider}/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn)
+@app.get(
+    "/{provider}/{owner}/{name}/", response_class=HTMLResponse, dependencies=_authn
+)
 async def repo_home(provider: str, owner: str, name: str) -> RedirectResponse:
     return RedirectResponse(url=f"/{provider}/{owner}/{name}/b/main")
 
 
 @app.get(
-    "/{provider}/{owner}/{name}/b/{branch:path}", response_class=HTMLResponse, dependencies=_authn
+    "/{provider}/{owner}/{name}/b/{branch:path}",
+    response_class=HTMLResponse,
+    dependencies=_authn,
 )
 async def repo_branch_dashboard(
     request: Request, provider: str, owner: str, name: str, branch: str
@@ -765,12 +769,18 @@ def report_html_root_for_hash(provider_id: str, repo_full: str, git_hash: str) -
 
 
 @app.get("/raw/{provider}/{owner}/{name}/h/{git_hash}", dependencies=_authn)
-async def raw_hash_redirect(provider: str, owner: str, name: str, git_hash: str) -> RedirectResponse:
-    return RedirectResponse(url=f"/raw/{provider}/{owner}/{name}/h/{git_hash}/", status_code=307)
+async def raw_hash_redirect(
+    provider: str, owner: str, name: str, git_hash: str
+) -> RedirectResponse:
+    return RedirectResponse(
+        url=f"/raw/{provider}/{owner}/{name}/h/{git_hash}/", status_code=307
+    )
 
 
 @app.get("/raw/{provider}/{owner}/{name}/h/{git_hash}/", dependencies=_authn)
-async def raw_hash_index(provider: str, owner: str, name: str, git_hash: str) -> FileResponse:
+async def raw_hash_index(
+    provider: str, owner: str, name: str, git_hash: str
+) -> FileResponse:
     provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(provider_id, repo_full, git_hash)
@@ -822,7 +832,9 @@ def framed_html_for(
 
 
 @app.get(
-    "/{provider}/{owner}/{name}/h/{git_hash}", response_class=HTMLResponse, dependencies=_authn
+    "/{provider}/{owner}/{name}/h/{git_hash}",
+    response_class=HTMLResponse,
+    dependencies=_authn,
 )
 async def repo_hash_framed(
     request: Request, provider: str, owner: str, name: str, git_hash: str
@@ -865,7 +877,9 @@ async def repo_hash_chart(
 # ----------------------------
 
 
-async def report_html_root_for_branch(provider_id: str, repo_full: str, branch: str) -> Path:
+async def report_html_root_for_branch(
+    provider_id: str, repo_full: str, branch: str
+) -> Path:
     head_hash = await db.latest_branch_head_hash(provider_id, repo_full, branch)
     if head_hash is None:
         raise HTTPException(
@@ -905,8 +919,12 @@ async def resolve_download_token(root: Path, token: str) -> tuple[str, Path]:
     return "file", p
 
 
-@app.get("/download/{token}/{provider}/{owner}/{name}/h/{git_hash}", dependencies=_authn)
-async def hash_download_token(provider: str, owner: str, name: str, git_hash: str, token: str):
+@app.get(
+    "/download/{token}/{provider}/{owner}/{name}/h/{git_hash}", dependencies=_authn
+)
+async def hash_download_token(
+    provider: str, owner: str, name: str, git_hash: str, token: str
+):
     provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     root = report_html_root_for_hash(provider_id, repo_full, git_hash)
@@ -936,8 +954,12 @@ async def hash_download_token(provider: str, owner: str, name: str, git_hash: st
     )
 
 
-@app.get("/download/{token}/{provider}/{owner}/{name}/b/{branch:path}", dependencies=_authn)
-async def branch_download_token(provider: str, owner: str, name: str, branch: str, token: str):
+@app.get(
+    "/download/{token}/{provider}/{owner}/{name}/b/{branch:path}", dependencies=_authn
+)
+async def branch_download_token(
+    provider: str, owner: str, name: str, branch: str, token: str
+):
     provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     root = await report_html_root_for_branch(provider_id, repo_full, branch)
@@ -979,7 +1001,9 @@ async def api_repo_hash_trend(
     provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     limit = max(1, min(int(limit), 2000))
-    points = await db.reports_trend_for_repo_hash(provider_id, repo_full, git_hash, limit)
+    points = await db.reports_trend_for_repo_hash(
+        provider_id, repo_full, git_hash, limit
+    )
     return JSONResponse(
         {"repo": repo_full, "kind": "hash", "ref": git_hash, "points": points}
     )
@@ -992,9 +1016,16 @@ async def latest_stats_from_xml(report_dir: Path) -> tuple[float, list[XmlFileSt
     return await asyncio.to_thread(parse_coverage_xml, xml_path)
 
 
-@app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/latest/worst-files", dependencies=_authn)
+@app.get(
+    "/api/{provider}/{owner}/{name}/h/{git_hash}/latest/worst-files",
+    dependencies=_authn,
+)
 async def api_repo_hash_latest_worst_files(
-    provider: str, owner: str, name: str, git_hash: str, limit: int = DEFAULT_WORST_FILES
+    provider: str,
+    owner: str,
+    name: str,
+    git_hash: str,
+    limit: int = DEFAULT_WORST_FILES,
 ) -> JSONResponse:
     provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
@@ -1023,7 +1054,10 @@ async def api_repo_hash_latest_worst_files(
     )
 
 
-@app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/latest/uncovered-lines", dependencies=_authn)
+@app.get(
+    "/api/{provider}/{owner}/{name}/h/{git_hash}/latest/uncovered-lines",
+    dependencies=_authn,
+)
 async def api_repo_hash_latest_uncovered_lines(
     provider: str, owner: str, name: str, git_hash: str, limit: int = DEFAULT_PIE_FILES
 ) -> JSONResponse:
@@ -1076,7 +1110,10 @@ async def api_repo_branch_trend(
     )
 
 
-@app.get("/api/{provider}/{owner}/{name}/b/{branch:path}/latest/worst-files", dependencies=_authn)
+@app.get(
+    "/api/{provider}/{owner}/{name}/b/{branch:path}/latest/worst-files",
+    dependencies=_authn,
+)
 async def api_repo_branch_latest_worst_files(
     provider: str, owner: str, name: str, branch: str, limit: int = DEFAULT_WORST_FILES
 ) -> JSONResponse:
@@ -1112,7 +1149,8 @@ async def api_repo_branch_latest_worst_files(
 
 
 @app.get(
-    "/api/{provider}/{owner}/{name}/b/{branch:path}/latest/uncovered-lines", dependencies=_authn
+    "/api/{provider}/{owner}/{name}/b/{branch:path}/latest/uncovered-lines",
+    dependencies=_authn,
 )
 async def api_repo_branch_latest_uncovered_lines(
     provider: str, owner: str, name: str, branch: str, limit: int = DEFAULT_PIE_FILES

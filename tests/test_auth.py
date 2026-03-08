@@ -617,7 +617,8 @@ class TestRequireViewPermission:
         assert "/auth/fakeprov/login" in loc
         # The next param should be the *path*, not a full URL
         assert (
-            "next=%2Fgh%2Falice%2Fproj%2Fb%2Fmain" in loc or "next=/gh/alice/proj/b/main" in loc
+            "next=%2Fgh%2Falice%2Fproj%2Fb%2Fmain" in loc
+            or "next=/gh/alice/proj/b/main" in loc
         )
 
     async def test_unauthenticated_api_returns_401(self, auth_client: AsyncClient):

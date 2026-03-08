@@ -476,7 +476,9 @@ async def seed_report(
     """Seed a report record + write the HTML directory with coverage.xml."""
     repo_fs = app_module.repo_to_fs(repo_full)
     if provider_id:
-        report_dir = tmp_data_dir / "covsrv_data" / "reports" / provider_id / repo_fs / "h" / sha
+        report_dir = (
+            tmp_data_dir / "covsrv_data" / "reports" / provider_id / repo_fs / "h" / sha
+        )
     else:
         report_dir = tmp_data_dir / "covsrv_data" / "reports" / repo_fs / "h" / sha
     html_dir = report_dir / "html"
@@ -512,7 +514,11 @@ async def seed_report(
             updated_ts=received_ts,
         )
         stmt = stmt.on_conflict_do_update(
-            index_elements=[BranchHead.provider_id, BranchHead.repo, BranchHead.branch_name],
+            index_elements=[
+                BranchHead.provider_id,
+                BranchHead.repo,
+                BranchHead.branch_name,
+            ],
             set_={
                 "current_hash": stmt.excluded.current_hash,
                 "updated_ts": stmt.excluded.updated_ts,
@@ -572,7 +578,9 @@ class TestBranchDashboard:
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        await seed_report(tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh")
+        await seed_report(
+            tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh"
+        )
         resp = await client.get("/gh/alice/proj/b/main")
         assert resp.status_code == 200
         assert "gitlab.com/alice/proj" in resp.text
@@ -602,7 +610,9 @@ class TestHashFramedView:
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        await seed_report(tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh")
+        await seed_report(
+            tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh"
+        )
         resp = await client.get(f"/gh/alice/proj/h/{SHA}")
         assert "gitlab.com/alice/proj" in resp.text
 
@@ -618,7 +628,9 @@ class TestHashChart:
     async def test_uses_provider_url_from_report(
         self, client: AsyncClient, tmp_data_dir
     ):
-        await seed_report(tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh")
+        await seed_report(
+            tmp_data_dir, provider_url="https://gitlab.com", provider_id="gh"
+        )
         resp = await client.get(f"/gh/alice/proj/h/{SHA}/chart")
         assert "gitlab.com/alice/proj" in resp.text
 
@@ -908,7 +920,7 @@ class TestIngestReport:
         assert "hash_dashboard_url" in data
         assert "/gh/alice/proj/" in data["hash_dashboard_url"]
 
-    async def test_duplicate_ingest_returns_409(
+    async def test_duplicate_ingest_returns_200(
         self, auth_client: AsyncClient, tmp_data_dir
     ):
         tarball = make_tarball_bytes()
@@ -942,7 +954,8 @@ class TestIngestReport:
             files={"tarball": ("report.tar.gz", tarball2, "application/gzip")},
             headers={"x-access-token": "dummy"},
         )
-        assert resp2.status_code == 409
+        assert resp2.status_code == 200
+        assert resp2.json()["detail"] == "Report already exists for this SHA"
 
     async def test_missing_coverage_xml_returns_400(
         self, auth_client: AsyncClient, tmp_data_dir

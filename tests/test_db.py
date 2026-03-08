@@ -77,7 +77,9 @@ class TestUpsertRepoSeen:
             await db.upsert_repo_seen(sess, "prov", "alice/foo", 1000)
 
         async with db.session() as sess:
-            result = await sess.execute(select(Repo).where(Repo.provider_id == "prov", Repo.repo == "alice/foo"))
+            result = await sess.execute(
+                select(Repo).where(Repo.provider_id == "prov", Repo.repo == "alice/foo")
+            )
             row = result.scalars().first()
             assert row is not None
             assert row.first_seen_ts == 1000
@@ -90,7 +92,9 @@ class TestUpsertRepoSeen:
             await db.upsert_repo_seen(sess, "prov", "alice/foo", 2000)
 
         async with db.session() as sess:
-            result = await sess.execute(select(Repo).where(Repo.provider_id == "prov", Repo.repo == "alice/foo"))
+            result = await sess.execute(
+                select(Repo).where(Repo.provider_id == "prov", Repo.repo == "alice/foo")
+            )
             row = result.scalars().first()
             assert row is not None
             assert row.first_seen_ts == 1000
@@ -160,7 +164,9 @@ class TestLatestReportForRepoHash:
                 )
             )
 
-        result = await db.latest_report_for_repo_hash("prov", "owner/repo", "deadbeef123")
+        result = await db.latest_report_for_repo_hash(
+            "prov", "owner/repo", "deadbeef123"
+        )
         assert result is None
 
     async def test_different_provider_not_found(self, initialized_db):
@@ -177,7 +183,9 @@ class TestLatestReportForRepoHash:
                 )
             )
 
-        result = await db.latest_report_for_repo_hash("prov2", "owner/repo", "abc1234567")
+        result = await db.latest_report_for_repo_hash(
+            "prov2", "owner/repo", "abc1234567"
+        )
         assert result is None
 
 
@@ -267,7 +275,9 @@ class TestBranchEventsFor:
 
 class TestReportsTrendForRepoHash:
     async def test_empty(self, initialized_db):
-        result = await db.reports_trend_for_repo_hash("prov", "owner/repo", "abc1234567", 10)
+        result = await db.reports_trend_for_repo_hash(
+            "prov", "owner/repo", "abc1234567", 10
+        )
         assert result == []
 
     async def test_returns_matching_records(self, initialized_db):
@@ -284,7 +294,9 @@ class TestReportsTrendForRepoHash:
                 )
             )
 
-        result = await db.reports_trend_for_repo_hash("prov", "owner/repo", "abc1234567", 10)
+        result = await db.reports_trend_for_repo_hash(
+            "prov", "owner/repo", "abc1234567", 10
+        )
         assert len(result) == 1
         assert result[0]["overall_percent"] == 85.5
 
@@ -336,11 +348,20 @@ class TestReportPercentForHashes:
 class TestSession:
     async def test_commits_on_success(self, initialized_db):
         async with db.session() as sess:
-            sess.add(Repo(provider_id="prov", repo="test/repo", first_seen_ts=100, last_seen_ts=100))
+            sess.add(
+                Repo(
+                    provider_id="prov",
+                    repo="test/repo",
+                    first_seen_ts=100,
+                    last_seen_ts=100,
+                )
+            )
 
         # Read back in a separate session
         async with db.session() as sess:
-            result = await sess.execute(select(Repo).where(Repo.provider_id == "prov", Repo.repo == "test/repo"))
+            result = await sess.execute(
+                select(Repo).where(Repo.provider_id == "prov", Repo.repo == "test/repo")
+            )
             row = result.scalars().first()
             assert row is not None
 
@@ -348,14 +369,21 @@ class TestSession:
         with pytest.raises(ValueError):
             async with db.session() as sess:
                 sess.add(
-                    Repo(provider_id="prov", repo="rollback/repo", first_seen_ts=100, last_seen_ts=100)
+                    Repo(
+                        provider_id="prov",
+                        repo="rollback/repo",
+                        first_seen_ts=100,
+                        last_seen_ts=100,
+                    )
                 )
                 raise ValueError("oops")
 
         # Data should NOT be committed
         async with db.session() as sess:
             result = await sess.execute(
-                select(Repo).where(Repo.provider_id == "prov", Repo.repo == "rollback/repo")
+                select(Repo).where(
+                    Repo.provider_id == "prov", Repo.repo == "rollback/repo"
+                )
             )
             row = result.scalars().first()
             assert row is None

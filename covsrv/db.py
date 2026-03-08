@@ -104,8 +104,12 @@ async def dispose() -> None:
 # ------------------------------------------------------------------
 
 
-async def upsert_repo_seen(sess: AsyncSession, provider_id: str, repo: str, ts: int) -> None:
-    stmt = sqlite_insert(Repo).values(provider_id=provider_id, repo=repo, first_seen_ts=ts, last_seen_ts=ts)
+async def upsert_repo_seen(
+    sess: AsyncSession, provider_id: str, repo: str, ts: int
+) -> None:
+    stmt = sqlite_insert(Repo).values(
+        provider_id=provider_id, repo=repo, first_seen_ts=ts, last_seen_ts=ts
+    )
     stmt = stmt.on_conflict_do_update(
         index_elements=[Repo.provider_id, Repo.repo],
         set_={"last_seen_ts": stmt.excluded.last_seen_ts},
@@ -122,10 +126,18 @@ async def upsert_branch_head(
     ts: int,
 ) -> None:
     stmt = sqlite_insert(BranchHead).values(
-        provider_id=provider_id, repo=repo, branch_name=branch_name, current_hash=git_hash, updated_ts=ts
+        provider_id=provider_id,
+        repo=repo,
+        branch_name=branch_name,
+        current_hash=git_hash,
+        updated_ts=ts,
     )
     stmt = stmt.on_conflict_do_update(
-        index_elements=[BranchHead.provider_id, BranchHead.repo, BranchHead.branch_name],
+        index_elements=[
+            BranchHead.provider_id,
+            BranchHead.repo,
+            BranchHead.branch_name,
+        ],
         set_={
             "current_hash": stmt.excluded.current_hash,
             "updated_ts": stmt.excluded.updated_ts,
@@ -170,7 +182,9 @@ async def latest_report_for_repo_hash(
         }
 
 
-async def latest_branch_head_hash(provider_id: str, repo: str, branch_name: str) -> str | None:
+async def latest_branch_head_hash(
+    provider_id: str, repo: str, branch_name: str
+) -> str | None:
     async with session() as sess:
         stmt = (
             select(BranchHead.current_hash)
