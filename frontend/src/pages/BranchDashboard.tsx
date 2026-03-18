@@ -28,6 +28,7 @@ export default function BranchDashboard() {
   const [files, setFiles] = useState<UncoveredFile[]>([]);
   const [latest, setLatest] = useState<LatestMeta | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
+  const [repoUrl, setRepoUrl] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,6 +42,9 @@ export default function BranchDashboard() {
       setFiles(uncovered.files ?? []);
       setLatest(uncovered.latest);
       setBranches(branchesRes.branches ?? []);
+      if (branchesRes.provider_url) {
+        setRepoUrl(`${branchesRes.provider_url}/${owner}/${name}`);
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [provider, owner, name, branch]);
@@ -72,15 +76,12 @@ export default function BranchDashboard() {
   const rawFramedUrl = latest ? `${repoBase(rp)}/h/${latest.git_hash}` : "";
   // spreadsheet / raw report button
   const spreadsheetUrl = latest ? `${repoBase(rp)}/h/${latest.git_hash}` : "";
-  // GitHub/Gitea URL — we don't know the provider base URL client-side,
-  // so we'll just not render it if we can't derive it. The repo link still
-  // works through the navbar repo button linked from the API response.
-
   const downloadBase = `/${provider}/${owner}/${name}`;
 
   return (
     <>
       <Navbar
+        repoUrl={repoUrl}
         branches={branches}
         branchesBaseUrl={repoBase(rp)}
         currentBranch={branch}

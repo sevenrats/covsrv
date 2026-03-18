@@ -1,7 +1,7 @@
 import "./Navbar.css";
 
 import { useState, useRef, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTheme } from "../hooks/useTheme";
 
 interface NavbarProps {
@@ -27,7 +27,6 @@ export default function Navbar({
   pill,
   extraButtons,
 }: NavbarProps) {
-  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
 
   const [branchOpen, setBranchOpen] = useState(false);
@@ -51,25 +50,6 @@ export default function Navbar({
 
   return (
     <nav className="navbar">
-      {/* Back: always use router navigation */}
-      <button
-        className="nav-btn"
-        title="Back"
-        type="button"
-        onClick={() => navigate(-1)}
-      >
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
-
       {/* Branch dropdown */}
       {branches.length > 0 && (
         <div className="branch-dropdown" ref={branchRef}>

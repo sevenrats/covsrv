@@ -34,6 +34,7 @@ export default function HashDashboard() {
   const [latest, setLatest] = useState<LatestMeta | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
   const [hashBranches, setHashBranches] = useState<string[]>([]);
+  const [repoUrl, setRepoUrl] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,6 +51,9 @@ export default function HashDashboard() {
         setWorstFiles(worst.files ?? []);
         setBranches(branchesRes.branches ?? []);
         setHashBranches(hashBranchesRes.branches ?? []);
+        if (branchesRes.provider_url) {
+          setRepoUrl(`${branchesRes.provider_url}/${owner}/${name}`);
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -83,6 +87,7 @@ export default function HashDashboard() {
   return (
     <>
       <Navbar
+        repoUrl={repoUrl}
         branches={branches}
         branchesBaseUrl={repoBase(rp)}
         pill={pillContent}

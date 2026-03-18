@@ -44,6 +44,7 @@ export interface WorstFilesResponse {
 
 export interface BranchesResponse {
   branches: string[];
+  provider_url?: string;
 }
 
 export interface HashBranchesResponse {

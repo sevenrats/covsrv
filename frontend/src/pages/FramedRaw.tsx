@@ -21,6 +21,7 @@ export default function FramedRaw() {
   const rp: RouteParams = { provider, owner, name };
 
   const [branches, setBranches] = useState<string[]>([]);
+  const [repoUrl, setRepoUrl] = useState<string | undefined>();
   const [showOverlay, setShowOverlay] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
@@ -30,7 +31,12 @@ export default function FramedRaw() {
 
   useEffect(() => {
     fetchBranches(provider, owner, name)
-      .then((res) => setBranches(res.branches ?? []))
+      .then((res) => {
+        setBranches(res.branches ?? []);
+        if (res.provider_url) {
+          setRepoUrl(`${res.provider_url}/${owner}/${name}`);
+        }
+      })
       .catch(() => {});
   }, [provider, owner, name]);
 
@@ -101,6 +107,7 @@ export default function FramedRaw() {
   return (
     <div className="framed-raw" style={{ height: "100vh", overflow: "hidden" }}>
       <Navbar
+        repoUrl={repoUrl}
         branches={branches}
         branchesBaseUrl={repoBase(rp)}
         extraButtons={

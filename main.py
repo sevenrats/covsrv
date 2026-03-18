@@ -1026,7 +1026,10 @@ async def api_repo_branches(provider: str, owner: str, name: str) -> JSONRespons
     provider_id = _get_provider_id(provider)
     repo_full = repo_from_owner_name(owner, name)
     branches = await db.branches_for_repo(provider_id, repo_full)
-    return JSONResponse({"branches": branches})
+    return JSONResponse({
+        "branches": branches,
+        "provider_url": _get_provider_url(provider),
+    })
 
 
 @app.get("/api/{provider}/{owner}/{name}/h/{git_hash}/branches", dependencies=_authn)
