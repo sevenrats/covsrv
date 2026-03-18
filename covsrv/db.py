@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -323,3 +323,101 @@ async def report_percent_for_hashes(
                 }
             )
     return points
+
+
+# ------------------------------------------------------------------
+# Home-page queries
+# ------------------------------------------------------------------
+
+
+async def all_repos() -> list[dict[str, Any]]:
+    """Return all tracked repos with their timestamps."""
+    async with session() as sess:
+        stmt = select(Repo).order_by(Repo.last_seen_ts.desc())
+        result = await sess.execute(stmt)
+        return [
+            {
+                "provider_id": r.provider_id,
+                "repo": r.repo,
+                "first_seen_ts": r.first_seen_ts,
+                "last_seen_ts": r.last_seen_ts,
+            }
+            for r in result.scalars().all()
+        ]
+
+
+async def repos_for_provider(provider_id: str) -> list[dict[str, Any]]:
+    """Return all tracked repos for a single provider."""
+    async with session() as sess:
+        stmt = (
+            select(Repo)
+            .where(Repo.provider_id == provider_id)
+            .order_by(Repo.last_seen_ts.desc())
+        )
+        result = await sess.execute(stmt)
+        return [
+            {
+                "provider_id": r.provider_id,
+                "repo": r.repo,
+                "first_seen_ts": r.first_seen_ts,
+                "last_seen_ts": r.last_seen_ts,
+            }
+            for r in result.scalars().all()
+        ]
+
+
+async def latest_default_branch_coverage(
+    provider_id: str, repo: str
+) -> dict[str, Any] | None:
+    """Return the latest report for the default branch (main or master).
+
+    Tries ``main`` first, then ``master``.  Returns None if neither exists.
+    """
+    for branch in ("main", "master"):
+        head = await latest_branch_head_hash(provider_id, repo, branch)
+        if head is not None:
+            rpt = await latest_report_for_repo_hash(provider_id, repo, head)
+            if rpt is not None:
+                return {**rpt, "default_branch": branch}
+    return None
+
+
+async def branch_count(provider_id: str, repo: str) -> int:
+    """Return the number of tracked branches for a repo."""
+    async with session() as sess:
+        stmt = (
+            select(func.count())
+            .select_from(BranchHead.__table__)
+            .where(
+                BranchHead.provider_id == provider_id,
+                BranchHead.repo == repo,
+            )
+        )
+        result = await sess.execute(stmt)
+        return int(result.scalar() or 0)
+
+
+async def recent_reports(
+    provider_id: str, repo: str, limit: int = 2
+) -> list[dict[str, Any]]:
+    """Return the N most recent reports for a repo, newest first."""
+    async with session() as sess:
+        stmt = (
+            select(Report)
+            .where(
+                Report.provider_id == provider_id,
+                Report.repo == repo,
+            )
+            .order_by(Report.received_ts.desc())
+            .limit(limit)
+        )
+        result = await sess.execute(stmt)
+        return [
+            {
+                "git_hash": r.git_hash,
+                "branch_name": r.branch_name,
+                "overall_percent": r.overall_percent,
+                "received_ts": r.received_ts,
+            }
+            for r in result.scalars().all()
+        ]

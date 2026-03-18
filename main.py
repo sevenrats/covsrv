@@ -37,10 +37,12 @@ from covsrv.auth import (
     AccessDenied,
     AuthenticationRequired,
     auth_router,
+    auth_state,
     load_auth_config,
     require_view_permission,
     setup_auth,
 )
+from covsrv.auth.session import get_provider_session
 from covsrv.badges import badge_color, coverage_message, render_badge_svg, svg_response
 from covsrv.config import ConfigManager
 from covsrv.models import DEFAULT_PROVIDER_URL, BranchEvent, Report
@@ -597,6 +599,170 @@ async def ingest_report(
         "branch_dashboard_url": f"/{pslug}/{dto.owner}/{dto.repo}/b/{dto.branch}",
         "hash_raw_url": f"/raw/{pslug}/{dto.owner}/{dto.repo}/h/{dto.sha}/",
     }
+
+
+# ----------------------------
+# Home page API
+# ----------------------------
+
+
+async def _build_repo_summary(
+    provider_name: str, provider_id: str, repo_row: dict[str, Any]
+) -> dict[str, Any]:
+    """Build a summary dict for a single repo."""
+    repo_full = repo_row["repo"]
+    owner, name = repo_full.split("/", 1)
+
+    cov = await db.latest_default_branch_coverage(provider_id, repo_full)
+    branches = await db.branch_count(provider_id, repo_full)
+
+    summary: dict[str, Any] = {
+        "provider": provider_name,
+        "owner": owner,
+        "name": name,
+        "repo": repo_full,
+        "last_seen_ts": repo_row["last_seen_ts"],
+        "branch_count": branches,
+        "coverage": None,
+        "delta": None,
+        "default_branch": None,
+    }
+
+    if cov is not None:
+        summary["coverage"] = float(cov["overall_percent"])
+        summary["default_branch"] = cov.get("default_branch", "main")
+
+        # Compute delta from two most recent reports on the default branch
+        recents = await db.recent_reports(provider_id, repo_full, limit=2)
+        if len(recents) >= 2:
+            summary["delta"] = round(
+                recents[0]["overall_percent"] - recents[1]["overall_percent"], 2
+            )
+
+    return summary
+
+
+@app.get("/api/home")
+async def api_home(request: Request) -> JSONResponse:
+    """Return repos the current user can see, with summary stats.
+
+    Strategy:
+    - For each provider the user is logged into, ask the forge
+      "what repos can this user see?" and intersect with tracked repos.
+    - Also include public repos (checked anonymously, cached).
+    - When auth is disabled, return all tracked repos.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    providers_data: list[dict[str, Any]] = []
+    seen_repos: set[str] = set()  # "provider_id:owner/repo" dedup key
+
+    auth_enabled = (
+        auth_state.config is not None and auth_state.config.enabled
+    )
+
+    if not auth_enabled:
+        # Auth disabled — return everything
+        all_repos = await db.all_repos()
+        # Group by provider_id, resolve provider name
+        by_pid: dict[str, list[dict[str, Any]]] = {}
+        for r in all_repos:
+            by_pid.setdefault(r["provider_id"], []).append(r)
+
+        for pid, rows in by_pid.items():
+            pname = pid  # fallback
+            if config_manager is not None:
+                for name, entry in config_manager.providers.items():
+                    if entry.id == pid:
+                        pname = name
+                        break
+
+            repos_out = []
+            for row in rows:
+                s = await _build_repo_summary(pname, pid, row)
+                repos_out.append(s)
+
+            providers_data.append({
+                "provider": pname,
+                "logged_in": True,
+                "repos": repos_out,
+            })
+
+        return JSONResponse({"providers": providers_data})
+
+    # Auth enabled — merge authenticated + public repos
+    for provider_name, provider in auth_state.providers.items():
+        pid = ""
+        if config_manager is not None:
+            entry = config_manager.get_provider(provider_name)
+            pid = entry.id if entry else provider_name
+        else:
+            pid = provider_name
+
+        session_data = get_provider_session(request, provider_name)
+        logged_in = session_data is not None
+        user_repo_names: set[str] = set()
+
+        # Authenticated: ask forge for user's repos
+        if logged_in and session_data is not None:
+            try:
+                forge_repos = await provider.list_user_repos(
+                    session_data["access_token"]
+                )
+                user_repo_names.update(forge_repos)
+            except Exception:
+                logger.warning(
+                    "Failed to list repos from %s", provider_name, exc_info=True
+                )
+
+        # Get tracked repos for this provider
+        tracked = await db.repos_for_provider(pid)
+        tracked_names = {r["repo"] for r in tracked}
+        tracked_map = {r["repo"]: r for r in tracked}
+
+        visible_names: set[str] = set()
+
+        # Intersect forge repos with tracked repos
+        if logged_in:
+            visible_names = user_repo_names & tracked_names
+
+        # Also check public repos (anonymous, cached)
+        for repo_full in tracked_names - visible_names:
+            owner, rname = repo_full.split("/", 1)
+            cache_key = (provider_name, "__public__", owner, rname)
+            cached = auth_state.cache.get(provider_name, "__public__", owner, rname)
+            if cached is True:
+                visible_names.add(repo_full)
+            elif cached is None:
+                try:
+                    is_public = await provider.is_repo_public(owner, rname)
+                    auth_state.cache.put(
+                        provider_name, "__public__", owner, rname, is_public
+                    )
+                    if is_public:
+                        visible_names.add(repo_full)
+                except Exception:
+                    pass
+
+        repos_out = []
+        for rn in sorted(visible_names):
+            key = f"{pid}:{rn}"
+            if key in seen_repos:
+                continue
+            seen_repos.add(key)
+            row = tracked_map[rn]
+            s = await _build_repo_summary(provider_name, pid, row)
+            repos_out.append(s)
+
+        providers_data.append({
+            "provider": provider_name,
+            "logged_in": logged_in,
+            "repos": repos_out,
+        })
+
+    return JSONResponse({"providers": providers_data})
 
 
 @app.get("/badge/{provider}/{owner}/{name}/h/{git_hash}")

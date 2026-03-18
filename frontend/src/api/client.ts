@@ -142,3 +142,31 @@ export function fetchHashBranches(
     `${apiBase(provider, owner, name)}/h/${gitHash}/branches`,
   );
 }
+
+/* ── Home page ── */
+
+export interface HomeRepoSummary {
+  provider: string;
+  owner: string;
+  name: string;
+  repo: string;
+  last_seen_ts: number;
+  branch_count: number;
+  coverage: number | null;
+  delta: number | null;
+  default_branch: string | null;
+}
+
+export interface HomeProviderGroup {
+  provider: string;
+  logged_in: boolean;
+  repos: HomeRepoSummary[];
+}
+
+export interface HomeResponse {
+  providers: HomeProviderGroup[];
+}
+
+export function fetchHome(): Promise<HomeResponse> {
+  return fetchJson("/api/home");
+}

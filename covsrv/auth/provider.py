@@ -97,6 +97,15 @@ class OAuthProvider(ABC):
         """
         return False
 
+    async def list_user_repos(self, access_token: str) -> list[str]:
+        """Return ``owner/repo`` strings the token bearer can access.
+
+        Used by the home-page endpoint to build a safe-to-show repo
+        list without per-repo API calls.  Default returns an empty list;
+        providers should override with the appropriate API call.
+        """
+        return []
+
     async def can_view(
         self, access_token: str, resource: ResourceDescriptor
     ) -> RepoAccess:

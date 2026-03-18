@@ -94,6 +94,34 @@ class GitHubProvider(OAuthProvider):
             return RepoAccess.TOKEN_EXPIRED
         return RepoAccess.DENIED
 
+    async def list_user_repos(self, access_token: str) -> list[str]:
+        """Paginate GET /user/repos and return 'owner/name' strings."""
+        repos: list[str] = []
+        page = 1
+        async with httpx.AsyncClient(timeout=15) as client:
+            while True:
+                resp = await client.get(
+                    f"{self._config.api_base_url}/user/repos",
+                    params={"per_page": 100, "page": page},
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+                if resp.status_code != 200:
+                    break
+                data = resp.json()
+                if not data:
+                    break
+                for r in data:
+                    full_name = r.get("full_name", "")
+                    if full_name:
+                        repos.append(full_name)
+                if len(data) < 100:
+                    break
+                page += 1
+        return repos
+
     async def is_repo_public(self, owner: str, repo: str) -> bool:
         """Anonymous GET — public only when the API confirms ``private`` is false."""
         async with httpx.AsyncClient(timeout=10) as client:

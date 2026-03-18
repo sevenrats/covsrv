@@ -196,3 +196,137 @@ a:hover {
   font-size: 15px;
   line-height: 1.5;
 }
+
+/* ── Home page ── */
+
+.home-empty {
+  text-align: center;
+  padding: 80px 20px;
+}
+
+.home-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+
+.home-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: var(--clr-surface);
+  border: 1px solid var(--clr-border);
+}
+
+.home-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.home-stat-label {
+  font-size: 14px;
+  color: var(--clr-text-muted);
+}
+
+.home-stat--warn .home-stat-value {
+  color: var(--clr-cov-bad);
+}
+
+.home-stat--good .home-stat-value {
+  color: var(--clr-cov-great);
+}
+
+.home-provider-section {
+  margin-bottom: 32px;
+}
+
+.home-provider-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.home-provider-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.home-provider-count {
+  margin-left: 8px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--clr-text-muted);
+}
+
+.home-repo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.home-repo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-repo-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-repo-name {
+  font-size: 15px;
+  text-decoration: none;
+  color: var(--clr-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-repo-name:hover {
+  color: var(--clr-accent);
+}
+
+.home-repo-name strong {
+  font-weight: 600;
+}
+
+.home-repo-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--clr-text-muted);
+}
+
+.home-cov-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1.5px solid;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.home-delta {
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.home-delta--up {
+  color: var(--clr-cov-great);
+}
+
+.home-delta--down {
+  color: var(--clr-cov-bad);
+}

@@ -3,10 +3,14 @@ import BranchDashboard from "./pages/BranchDashboard";
 import HashDashboard from "./pages/HashDashboard";
 import FramedRaw from "./pages/FramedRaw";
 import AccessDenied from "./pages/AccessDenied";
+import HomePage from "./pages/HomePage";
 
 export default function App() {
   return (
     <Routes>
+      {/* Home page */}
+      <Route path="/" element={<HomePage />} />
+
       {/* Branch dashboard */}
       <Route
         path="/:provider/:owner/:name/b/*"
@@ -37,9 +41,6 @@ export default function App() {
         path="/:provider/:owner/:name"
         element={<RepoRedirect />}
       />
-
-      {/* Root → docs */}
-      <Route path="/" element={<Navigate to="/docs" replace />} />
     </Routes>
   );
 }
