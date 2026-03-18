@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text as sa_text
 
 # We import from main at function/class level so the module is available
 import main as app_module
@@ -929,3 +930,100 @@ class TestIngestReport:
             files={"tarball": ("report.tar.gz", tarball, "application/gzip")},
         )
         assert resp.status_code == 401
+
+
+# -----------------------------------------------------------------------
+# GET /api/home
+# -----------------------------------------------------------------------
+
+
+class TestApiHome:
+    @pytest_asyncio.fixture()
+    async def seeded_client(self, initialized_db, tmp_data_dir):
+        """Client with a report already ingested."""
+        with (
+            patch.object(app_module, "extract_token", return_value="dummy-token"),
+            patch.object(app_module, "verify_report_access", return_value=None),
+        ):
+            transport = ASGITransport(app=app_module.app)
+            async with AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as ac:
+                tarball = make_tarball_bytes()
+                resp = await ac.post(
+                    "/reports",
+                    data={
+                        "owner": "alice",
+                        "repo": "proj",
+                        "branch": "main",
+                        "sha": "home1234567890abcdef1234567890abcdef12345",
+                        "provider": "gh",
+                        "provider_url": "https://github.com",
+                    },
+                    files={
+                        "tarball": ("report.tar.gz", tarball, "application/gzip")
+                    },
+                    headers={"x-access-token": "dummy"},
+                )
+                assert resp.status_code == 200
+                yield ac
+
+    async def test_home_returns_repos(self, seeded_client: AsyncClient):
+        resp = await seeded_client.get("/api/home")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "providers" in data
+        assert len(data["providers"]) >= 1
+
+        # Find the provider that has our repo
+        found = False
+        for pg in data["providers"]:
+            for repo in pg["repos"]:
+                if repo["owner"] == "alice" and repo["name"] == "proj":
+                    found = True
+                    assert repo["coverage"] == pytest.approx(85.0, abs=0.01)
+                    assert repo["branch_count"] >= 1
+                    assert repo["default_branch"] == "main"
+        assert found, f"alice/proj not found in response: {data}"
+
+    async def test_home_empty_db(self, client: AsyncClient):
+        resp = await client.get("/api/home")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["providers"] == []
+
+    async def test_home_backfill_migration(
+        self, seeded_client: AsyncClient
+    ):
+        """Migration 0005 backfills repos from reports when rows are missing."""
+        # Wipe the repos table to simulate a pre-backfill state
+        async with db.session() as sess:
+            await sess.execute(sa_text("DELETE FROM repos"))
+
+        # Verify it's actually empty now
+        resp = await seeded_client.get("/api/home")
+        data = resp.json()
+        total = sum(len(pg["repos"]) for pg in data["providers"])
+        assert total == 0
+
+        # Re-run the migration backfill SQL
+        async with db.session() as sess:
+            await sess.execute(
+                sa_text(
+                    "INSERT OR IGNORE INTO repos "
+                    "(provider_id, repo, first_seen_ts, last_seen_ts) "
+                    "SELECT provider_id, repo, MIN(received_ts), MAX(received_ts) "
+                    "FROM reports GROUP BY provider_id, repo"
+                )
+            )
+
+        # Now the home endpoint should find the repo
+        resp = await seeded_client.get("/api/home")
+        assert resp.status_code == 200
+        data = resp.json()
+        found = False
+        for pg in data["providers"]:
+            for repo in pg["repos"]:
+                if repo["owner"] == "alice" and repo["name"] == "proj":
+                    found = True
+        assert found, f"Backfill migration did not populate repos: {data}"

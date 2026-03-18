@@ -13,6 +13,7 @@ import { covColor } from "../components/charts/colors";
 export default function HomePage() {
   const [providers, setProviders] = useState<HomeProviderGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHome()
@@ -20,7 +21,11 @@ export default function HomePage() {
         setProviders(data.providers ?? []);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => {
+        console.error("Failed to fetch /api/home", err);
+        setError(String(err?.message ?? err));
+        setLoading(false);
+      });
   }, []);
 
   const totalRepos = providers.reduce((n, p) => n + p.repos.length, 0);
@@ -36,13 +41,21 @@ export default function HomePage() {
     }
   }
 
+  // Are there providers the user hasn't logged in to?
+  const notLoggedIn = providers.filter((p) => !p.logged_in);
+
   return (
     <>
       <Navbar pill="Coverage Dashboard" />
       <div className="content">
         {loading ? (
           <p style={{ color: "var(--clr-text-muted)" }}>Loading…</p>
-        ) : totalRepos === 0 ? (
+        ) : error ? (
+          <div className="home-empty">
+            <h2>Failed to load dashboard</h2>
+            <p style={{ color: "var(--clr-text-muted)" }}>{error}</p>
+          </div>
+        ) : totalRepos === 0 && notLoggedIn.length === 0 ? (
           <div className="home-empty">
             <h2>No repositories tracked yet</h2>
             <p style={{ color: "var(--clr-text-muted)" }}>
