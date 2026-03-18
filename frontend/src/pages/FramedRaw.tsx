@@ -28,6 +28,7 @@ export default function FramedRaw() {
   const rawSrc = `/raw/${provider}/${owner}/${name}/h/${gitHash}/`;
   const chartUrl = `${repoBase(rp)}/h/${gitHash}/chart`;
   const targetFile = searchParams.get("file");
+  const backUrl = searchParams.get("from") ?? undefined;
 
   useEffect(() => {
     fetchBranches(provider, owner, name)
@@ -107,6 +108,7 @@ export default function FramedRaw() {
   return (
     <div className="framed-raw" style={{ height: "100vh", overflow: "hidden" }}>
       <Navbar
+        backUrl={backUrl}
         repoUrl={repoUrl}
         branches={branches}
         branchesBaseUrl={repoBase(rp)}

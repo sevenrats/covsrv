@@ -1,10 +1,12 @@
 import "./Navbar.css";
 
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTheme } from "../hooks/useTheme";
 
 interface NavbarProps {
+  /** If set, render a back-arrow that navigates to this path */
+  backUrl?: string;
   /** GitHub / Gitea repo URL */
   repoUrl?: string;
   /** Available branches for this repo */
@@ -20,6 +22,7 @@ interface NavbarProps {
 }
 
 export default function Navbar({
+  backUrl,
   repoUrl,
   branches = [],
   branchesBaseUrl = "",
@@ -27,6 +30,7 @@ export default function Navbar({
   pill,
   extraButtons,
 }: NavbarProps) {
+  const navigate = useNavigate();
   const { theme, toggle } = useTheme();
 
   const [branchOpen, setBranchOpen] = useState(false);
@@ -50,6 +54,27 @@ export default function Navbar({
 
   return (
     <nav className="navbar">
+      {/* Back button (only shown when backUrl is provided) */}
+      {backUrl && (
+        <button
+          className="nav-btn"
+          title="Back"
+          type="button"
+          onClick={() => navigate(backUrl)}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+      )}
+
       {/* Branch dropdown */}
       {branches.length > 0 && (
         <div className="branch-dropdown" ref={branchRef}>

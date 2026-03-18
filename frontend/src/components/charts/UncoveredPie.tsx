@@ -10,9 +10,11 @@ interface UncoveredPieProps {
   files: UncoveredFile[];
   /** URL for clicking a slice: base + "?file=" + encodedFilename */
   rawFramedUrl?: string;
+  /** Origin chart URL to pass as "from" so the raw view can navigate back */
+  fromUrl?: string;
 }
 
-export default function UncoveredPie({ files, rawFramedUrl }: UncoveredPieProps) {
+export default function UncoveredPie({ files, rawFramedUrl, fromUrl }: UncoveredPieProps) {
   const navigate = useNavigate();
   const palette = piePalette();
 
@@ -39,7 +41,11 @@ export default function UncoveredPie({ files, rawFramedUrl }: UncoveredPieProps)
       if (elements.length > 0 && rawFramedUrl) {
         const idx = elements[0]!.index;
         const file = fullNames[idx];
-        if (file) navigate(`${rawFramedUrl}?file=${encodeURIComponent(file)}`);
+        if (file) {
+          const params = new URLSearchParams({ file });
+          if (fromUrl) params.set("from", fromUrl);
+          navigate(`${rawFramedUrl}?${params.toString()}`);
+        }
       }
     },
   };

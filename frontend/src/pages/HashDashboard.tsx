@@ -82,6 +82,7 @@ export default function HashDashboard() {
   }
 
   const rawFramedUrl = `${repoBase(rp)}/h/${gitHash}`;
+  const currentUrl = `${repoBase(rp)}/h/${gitHash}/chart`;
   const downloadBase = `/${provider}/${owner}/${name}`;
 
   return (
@@ -92,7 +93,7 @@ export default function HashDashboard() {
         branchesBaseUrl={repoBase(rp)}
         pill={pillContent}
         extraButtons={
-          <Link className="nav-btn" to={rawFramedUrl} title="Raw HTML Report">
+          <Link className="nav-btn" to={`${rawFramedUrl}?from=${encodeURIComponent(currentUrl)}`} title="Raw HTML Report">
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -151,7 +152,7 @@ export default function HashDashboard() {
             </Card>
 
             <Card title="Uncovered lines by file">
-              <UncoveredPie files={uncoveredFiles} rawFramedUrl={rawFramedUrl} />
+              <UncoveredPie files={uncoveredFiles} rawFramedUrl={rawFramedUrl} fromUrl={currentUrl} />
             </Card>
           </div>
         )}

@@ -76,6 +76,8 @@ export default function BranchDashboard() {
   const rawFramedUrl = latest ? `${repoBase(rp)}/h/${latest.git_hash}` : "";
   // spreadsheet / raw report button
   const spreadsheetUrl = latest ? `${repoBase(rp)}/h/${latest.git_hash}` : "";
+  // current page URL (used as "from" when navigating to raw view)
+  const currentUrl = `${repoBase(rp)}/b/${branch}`;
   const downloadBase = `/${provider}/${owner}/${name}`;
 
   return (
@@ -88,7 +90,7 @@ export default function BranchDashboard() {
         pill={pillContent}
         extraButtons={
           spreadsheetUrl ? (
-            <Link className="nav-btn" to={spreadsheetUrl} title="Raw HTML Report">
+            <Link className="nav-btn" to={`${spreadsheetUrl}?from=${encodeURIComponent(currentUrl)}`} title="Raw HTML Report">
               <svg
                 viewBox="0 0 24 24"
                 fill="none"
@@ -137,7 +139,7 @@ export default function BranchDashboard() {
             </Card>
 
             <Card title="Uncovered lines by file (latest)">
-              <UncoveredPie files={files} rawFramedUrl={rawFramedUrl} />
+              <UncoveredPie files={files} rawFramedUrl={rawFramedUrl} fromUrl={currentUrl} />
             </Card>
           </div>
         )}
